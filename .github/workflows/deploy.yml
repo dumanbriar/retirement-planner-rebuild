@@ -1,0 +1,127 @@
+name: Test & Deploy
+
+on:
+  push:
+    branches: [main, "claude/laughing-pasteur-8uq412"]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend deps
+        run: pip install -r backend/requirements.txt pytest
+      - name: Run engine tests
+        run: cd backend && python -m pytest tests/ -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Frontend typecheck & build
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Railway & Vercel CLIs
+        run: npm install -g @railway/cli vercel
+
+      - name: Deploy backend to Railway
+        id: railway
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set -x
+          cd backend
+          # link to the existing project, or create it on first run
+          railway link --project horizon-retirement-engine --environment production \
+            || railway init --name horizon-retirement-engine
+          railway add --service backend || echo "service may already exist"
+          railway up --service backend --ci
+          # generate (or fetch) the public domain
+          DOMAIN_OUT=$(railway domain --service backend --json || railway domain --service backend)
+          echo "domain output: $DOMAIN_OUT"
+          URL=$(echo "$DOMAIN_OUT" | grep -oE '[a-zA-Z0-9.-]+\.up\.railway\.app' | head -1)
+          if [ -z "$URL" ]; then
+            STATUS=$(railway status --json || true)
+            echo "$STATUS"
+            URL=$(echo "$STATUS" | grep -oE '[a-zA-Z0-9.-]+\.up\.railway\.app' | head -1)
+          fi
+          test -n "$URL"
+          echo "backend_url=https://$URL" >> "$GITHUB_OUTPUT"
+          echo "Backend URL: https://$URL"
+
+      - name: Wait for backend health
+        run: |
+          URL="${{ steps.railway.outputs.backend_url }}"
+          for i in $(seq 1 60); do
+            if curl -sf --max-time 10 "$URL/health" | grep -q ok; then
+              echo "backend healthy"; exit 0
+            fi
+            echo "waiting for backend ($i)..."; sleep 10
+          done
+          echo "backend did not become healthy in time"; exit 1
+
+      - name: Smoke-test the engine API
+        run: |
+          URL="${{ steps.railway.outputs.backend_url }}"
+          cat > /tmp/req.json <<'JSON'
+          {"persons":[{"name":"Sam","current_age":55,"retirement_age":65,"death_age":92,
+            "ss_monthly_at_fra":2800,"ss_claim_age":67}],
+           "accounts":[{"name":"401k","type":"tax_deferred","owner":0,"balance":850000,
+            "annual_contribution":30000}],
+           "annual_spending":80000,
+           "assumptions":{"roth_conversion_strategy":"none"}}
+          JSON
+          code=$(curl -s -o /tmp/plan.json -w "%{http_code}" --max-time 60 \
+            -H "Content-Type: application/json" -d @/tmp/req.json "$URL/api/plan")
+          test "$code" = "200"
+          grep -q nest_egg_at_retirement /tmp/plan.json
+          echo "engine smoke test passed"
+
+      - name: Deploy frontend to Vercel
+        id: vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          cd frontend
+          vercel link --yes --project horizon-retirement --token "$VERCEL_TOKEN"
+          URL=$(vercel deploy --prod --yes --token "$VERCEL_TOKEN" \
+            --build-env VITE_API_URL="${{ steps.railway.outputs.backend_url }}")
+          echo "frontend_url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Frontend URL: $URL"
+
+      - name: Verify frontend serves
+        run: |
+          URL="${{ steps.vercel.outputs.frontend_url }}"
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$URL")
+            if [ "$code" = "200" ]; then echo "frontend live"; exit 0; fi
+            echo "frontend status $code, waiting ($i)..."; sleep 5
+          done
+          exit 1
+
+      - name: Summary
+        run: |
+          {
+            echo "## Deployed"
+            echo "- Frontend: ${{ steps.vercel.outputs.frontend_url }}"
+            echo "- Backend: ${{ steps.railway.outputs.backend_url }}"
+          } >> "$GITHUB_STEP_SUMMARY"
