@@ -43,39 +43,20 @@ if [ -z "$MODE" ]; then
 fi
 echo "== token accepted as: $MODE token via $ENDPOINT =="
 
-cd "$(dirname "$0")/../backend"
-
 if [ "$MODE" = "project" ]; then
+  # project token: CLI works directly with RAILWAY_TOKEN
+  cd "$(dirname "$0")/../backend"
   export RAILWAY_TOKEN="$TOKEN"
-else
-  export RAILWAY_API_TOKEN="$TOKEN"
-  railway link -p "$PROJECT_NAME" -e production \
-    || railway init -n "$PROJECT_NAME" \
-    || { echo "::error::could not link or create project"; exit 1; }
-  railway add -s "$SERVICE_NAME" || echo "(service probably exists already)"
-fi
-
-echo "== railway status =="
-railway status --json || railway status || true
-
-if ! railway up -s "$SERVICE_NAME" -c; then
-  echo "up with -s failed; retrying without explicit service"
   railway up -c || { echo "::error::railway up failed"; exit 1; }
+  DOMAIN_OUT=$(railway domain --json 2>/dev/null || railway domain 2>/dev/null || true)
+  echo "domain output: $DOMAIN_OUT"
+  URL=$(echo "$DOMAIN_OUT" | grep -oE '[a-zA-Z0-9.-]+\.up\.railway\.app' | head -1)
+  [ -n "$URL" ] || { echo "::error::no public domain found"; exit 1; }
+  echo "backend_url=https://$URL" >> "${GITHUB_OUTPUT:-/dev/stdout}"
+  echo "Backend URL: https://$URL"
+else
+  # account/team token: GraphQL for project/service/domain, CLI for upload
+  export RAILWAY_ENDPOINT="$ENDPOINT/graphql/v2"
+  export RAILWAY_PROJECT_NAME="$PROJECT_NAME" RAILWAY_SERVICE_NAME="$SERVICE_NAME"
+  exec python3 "$(dirname "$0")/deploy_railway.py"
 fi
-
-DOMAIN_OUT=$(railway domain -s "$SERVICE_NAME" --json 2>/dev/null \
-  || railway domain -s "$SERVICE_NAME" 2>/dev/null \
-  || railway domain 2>/dev/null || true)
-echo "domain output: $DOMAIN_OUT"
-URL=$(echo "$DOMAIN_OUT" | grep -oE '[a-zA-Z0-9.-]+\.up\.railway\.app' | head -1)
-if [ -z "$URL" ]; then
-  STATUS=$(railway status --json 2>/dev/null || true)
-  echo "$STATUS"
-  URL=$(echo "$STATUS" | grep -oE '[a-zA-Z0-9.-]+\.up\.railway\.app' | head -1)
-fi
-if [ -z "$URL" ]; then
-  echo "::error::could not determine public domain for the backend service"
-  exit 1
-fi
-echo "backend_url=https://$URL" >> "${GITHUB_OUTPUT:-/dev/stdout}"
-echo "Backend URL: https://$URL"
