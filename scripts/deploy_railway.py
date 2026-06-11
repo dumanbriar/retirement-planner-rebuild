@@ -25,9 +25,15 @@ def gql(query: str, variables: dict | None = None) -> dict:
     req = urllib.request.Request(
         ENDPOINT, data=body, method="POST",
         headers={"Authorization": f"Bearer {TOKEN}",
-                 "Content-Type": "application/json"})
-    with urllib.request.urlopen(req) as r:
-        out = json.loads(r.read())
+                 "Content-Type": "application/json",
+                 # Railway's edge rejects the default Python-urllib UA
+                 "User-Agent": "curl/8.5.0"})
+    try:
+        with urllib.request.urlopen(req) as r:
+            out = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        print(f"HTTP {e.code} for query {query[:80]!r}: {e.read().decode(errors='replace')[:500]}")
+        return {}
     if out.get("errors"):
         print(f"GraphQL errors for query {query[:80]!r}:", json.dumps(out["errors"], indent=1))
     return out
@@ -50,14 +56,14 @@ def die(msg: str) -> None:
 # ---- 1. find or create the project --------------------------------------
 out = gql("query { projects { edges { node { id name environments "
           "{ edges { node { id name } } } } } } }")
-projects = [e["node"] for e in out.get("data", {}).get("projects", {}).get("edges", [])]
+projects = [e["node"] for e in (out.get("data") or {}).get("projects", {}).get("edges", [])]
 print("existing projects:", [(p["id"], p["name"]) for p in projects])
 project = next((p for p in projects if p["name"] == PROJECT_NAME), None)
 if project is None:
     out = gql("mutation($name:String!){ projectCreate(input:{name:$name}) "
               "{ id name environments { edges { node { id name } } } } }",
               {"name": PROJECT_NAME})
-    project = out.get("data", {}).get("projectCreate")
+    project = (out.get("data") or {}).get("projectCreate")
     if not project:
         introspect_input("ProjectCreateInput")
         die("projectCreate failed; see errors and introspection above")
@@ -71,7 +77,7 @@ print("project:", project["id"], "environment:", env["id"], env["name"])
 # ---- 2. find or create the service --------------------------------------
 out = gql("query($id:String!){ project(id:$id){ services { edges { node "
           "{ id name } } } } }", {"id": project["id"]})
-services = [e["node"] for e in out.get("data", {}).get("project", {})
+services = [e["node"] for e in (out.get("data") or {}).get("project", {})
             .get("services", {}).get("edges", [])]
 print("existing services:", services)
 service = next((s for s in services if s["name"] == SERVICE_NAME), None)
@@ -79,7 +85,7 @@ if service is None:
     out = gql("mutation($p:String!,$n:String!){ serviceCreate(input:"
               "{projectId:$p,name:$n}) { id name } }",
               {"p": project["id"], "n": SERVICE_NAME})
-    service = out.get("data", {}).get("serviceCreate")
+    service = (out.get("data") or {}).get("serviceCreate")
     if not service:
         introspect_input("ServiceCreateInput")
         die("serviceCreate failed; see errors and introspection above")
@@ -100,13 +106,13 @@ if proc.returncode != 0:
 out = gql("query($e:String!,$s:String!){ domains(environmentId:$e, serviceId:$s) "
           "{ serviceDomains { domain } customDomains { domain } } }",
           {"e": env["id"], "s": service["id"]})
-domains = out.get("data", {}).get("domains") or {}
+domains = (out.get("data") or {}).get("domains") or {}
 existing = [d["domain"] for d in (domains.get("serviceDomains") or [])]
 if not existing:
     out = gql("mutation($e:String!,$s:String!){ serviceDomainCreate(input:"
               "{environmentId:$e, serviceId:$s}) { domain } }",
               {"e": env["id"], "s": service["id"]})
-    created = out.get("data", {}).get("serviceDomainCreate")
+    created = (out.get("data") or {}).get("serviceDomainCreate")
     if not created:
         introspect_input("ServiceDomainCreateInput")
         die("serviceDomainCreate failed; see errors and introspection above")
