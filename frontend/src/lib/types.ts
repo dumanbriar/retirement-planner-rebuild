@@ -1,0 +1,253 @@
+/**
+ * TypeScript mirror of the backend API contract (backend/app/models.py).
+ *
+ * All monetary INPUTS are in today's dollars unless the field name says
+ * otherwise. The engine works in nominal dollars and reports both.
+ */
+
+// ----------------------------- inputs --------------------------------------
+
+export type AccountType = "tax_deferred" | "roth" | "taxable" | "hsa" | "cash";
+
+export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
+  tax_deferred: "Tax-deferred (401k/IRA)",
+  roth: "Roth",
+  taxable: "Taxable brokerage",
+  hsa: "HSA",
+  cash: "Cash / HYSA",
+};
+
+export const ACCOUNT_TYPE_SHORT: Record<AccountType, string> = {
+  tax_deferred: "Tax-deferred",
+  roth: "Roth",
+  taxable: "Taxable",
+  hsa: "HSA",
+  cash: "Cash",
+};
+
+/** Default expected returns by account type (mirrors DEFAULT_RETURNS). */
+export const DEFAULT_RETURNS: Record<AccountType, number> = {
+  tax_deferred: 0.06,
+  roth: 0.06,
+  taxable: 0.06,
+  hsa: 0.05,
+  cash: 0.04,
+};
+
+export interface Person {
+  name: string;
+  current_age: number; // 18..99
+  retirement_age: number; // 30..80
+  death_age: number; // 60..105
+  /** Monthly SS benefit at full retirement age (PIA from an SSA statement), today's $. */
+  ss_monthly_at_fra: number;
+  ss_claim_age: number; // 62..70
+}
+
+export interface Account {
+  name: string;
+  type: AccountType;
+  owner: number; // index into persons (0 or 1)
+  balance: number;
+  /** Taxable accounts only: cost basis today (null => defaults to balance). */
+  cost_basis: number | null;
+  annual_contribution: number;
+  /** null => engine default for the account type. */
+  expected_return: number | null; // -0.10..0.20
+}
+
+export interface Liability {
+  name: string;
+  balance: number;
+  interest_rate: number; // 0..0.30
+  annual_payment: number;
+}
+
+/** Pension, annuity, rental, part-time work in retirement, etc. */
+export interface IncomeStream {
+  name: string;
+  owner: number;
+  annual_amount: number; // today's dollars
+  start_age: number; // 30..100
+  end_age: number | null; // 30..110
+  cola: boolean; // grows with inflation
+  taxable: boolean; // taxed as ordinary income
+}
+
+export type ConversionStrategy =
+  | "none"
+  | "fill_10"
+  | "fill_12"
+  | "fill_22"
+  | "fill_24"
+  | "custom"
+  | "auto";
+
+export const CONVERSION_STRATEGY_LABELS: Record<ConversionStrategy, string> = {
+  auto: "Auto-optimize",
+  none: "No conversions",
+  fill_10: "Fill 10% bracket",
+  fill_12: "Fill 12% bracket",
+  fill_22: "Fill 22% bracket",
+  fill_24: "Fill 24% bracket",
+  custom: "Custom annual amount",
+};
+
+export interface Assumptions {
+  inflation: number; // 0..0.10
+  healthcare_inflation: number; // 0..0.12
+  state_tax_rate: number; // 0..0.15
+  /** Flat marginal rate used ONLY before retirement (dividend/interest drag). */
+  pre_retirement_tax_rate: number; // 0..0.50
+  /** Portion of taxable-account return paid out annually as qualified dividends. */
+  taxable_dividend_yield: number; // 0..0.08
+  /** Used to value remaining tax-deferred dollars after death. */
+  heir_tax_rate: number; // 0..0.50
+  contributions_grow_with_inflation: boolean;
+  roth_conversion_strategy: ConversionStrategy;
+  custom_conversion_amount: number;
+  optimize_ss_claiming: boolean;
+  /** Pre-65 ACA modeling (estimates, clearly labeled). */
+  aca_benchmark_monthly_per_person: number;
+  pre65_oop_annual_per_person: number;
+  /** 65+: Part D, Medigap/Advantage, dental, OOP (excl. Part B). */
+  medicare_other_annual_per_person: number;
+  /** Household MAGI in last two working years (IRMAA 2-yr lookback). null => engine estimate. */
+  pre_retirement_magi: number | null;
+}
+
+export interface PlanInput {
+  persons: Person[]; // 1..2
+  accounts: Account[]; // >= 1
+  liabilities: Liability[];
+  income_streams: IncomeStream[];
+  annual_spending: number; // retirement spend goal, today's $
+  assumptions: Assumptions;
+}
+
+// ----------------------------- outputs -------------------------------------
+
+/** One account's audit trail for one year. */
+export interface AccountYear {
+  name: string;
+  type: AccountType;
+  owner: number;
+  start_balance: number;
+  contribution: number;
+  withdrawal: number;
+  conversion_out: number; // tax-deferred -> roth
+  conversion_in: number;
+  growth: number;
+  end_balance: number;
+  cost_basis: number | null; // taxable accounts
+}
+
+export interface YearRow {
+  year: number;
+  ages: (number | null)[]; // null once deceased
+  phase: string; // accumulation | retirement
+  filing_status: string; // single | mfj
+  accounts: AccountYear[];
+
+  // cash flows (nominal $)
+  spend_goal: number;
+  debt_payments: number;
+  healthcare_cost: number; // net premiums + OOP, incl. IRMAA
+  aca_subsidy: number;
+  irmaa_surcharge: number;
+  ss_benefit: number[]; // per person, gross
+  ss_total: number;
+  other_income: number;
+  rmd_total: number;
+  rmd_by_person: number[];
+  withdrawals_by_type: Partial<Record<AccountType, number>>;
+  roth_conversion: number;
+  surplus_reinvested: number;
+  shortfall: number; // unmet spending (plan failure)
+
+  // tax detail (nominal $)
+  dividends: number;
+  interest: number;
+  realized_gains: number;
+  taxable_ss: number;
+  agi: number;
+  magi: number;
+  deductions: number;
+  taxable_income: number;
+  federal_tax: number;
+  ltcg_tax: number;
+  niit: number;
+  state_tax: number;
+  penalties: number;
+  total_tax: number;
+  marginal_rate: number;
+  effective_rate: number;
+
+  // balances
+  total_assets: number;
+  total_liabilities: number;
+  net_worth: number;
+  net_worth_real: number; // deflated to today's dollars
+  flags: string[];
+}
+
+export interface Metrics {
+  nest_egg_at_retirement: number;
+  nest_egg_at_retirement_real: number;
+  retirement_year: number;
+  ending_net_worth: number;
+  ending_net_worth_real: number;
+  ending_after_tax_real: number; // tax-deferred discounted at heir rate
+  lifetime_taxes: number;
+  lifetime_taxes_real: number;
+  depleted: boolean;
+  depletion_age: number | null; // primary person's age when funds ran out
+  success: boolean;
+  chosen_conversion_strategy: string;
+  ss_claim_ages: number[];
+}
+
+export interface SensitivityRow {
+  label: string;
+  parameter: string;
+  delta: string;
+  ending_net_worth_real: number;
+  nest_egg_real: number;
+  depletion_age: number | null;
+  success: boolean;
+}
+
+export interface StrategyComparison {
+  strategy: string;
+  ending_after_tax_real: number;
+  lifetime_taxes_real: number;
+  total_converted: number;
+  depletion_age: number | null;
+}
+
+export interface SSGridCell {
+  claim_ages: number[];
+  ending_after_tax_real: number;
+  depletion_age: number | null;
+}
+
+export type AssumptionKind = "modeled" | "estimated" | "assumed";
+
+export interface AssumptionNote {
+  label: string;
+  value: string;
+  kind: AssumptionKind | string;
+  source: string;
+}
+
+export interface PlanResult {
+  metrics: Metrics;
+  years: YearRow[];
+  sensitivity: SensitivityRow[];
+  conversion_comparison: StrategyComparison[];
+  ss_grid: SSGridCell[];
+  warnings: string[];
+  assumption_notes: AssumptionNote[];
+}
+
+export type DisplayMode = "real" | "nominal";

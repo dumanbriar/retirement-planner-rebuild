@@ -46,17 +46,25 @@ jobs:
       - name: Deploy backend to Railway
         id: railway
         env:
-          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           set -x
           cd backend
-          # link to the existing project, or create it on first run
-          railway link --project horizon-retirement-engine --environment production \
-            || railway init --name horizon-retirement-engine
-          railway add --service backend || echo "service may already exist"
-          railway up --service backend --ci
-          # generate (or fetch) the public domain
-          DOMAIN_OUT=$(railway domain --service backend --json || railway domain --service backend)
+          export RAILWAY_API_TOKEN="$TOKEN"
+          if railway whoami; then
+            # account/team token: link to the project, or create on first run
+            railway link -p horizon-retirement-engine -e production \
+              || railway init -n horizon-retirement-engine
+            railway add -s backend || echo "service may already exist"
+          else
+            # project-scoped token: no link/init needed
+            unset RAILWAY_API_TOKEN
+            export RAILWAY_TOKEN="$TOKEN"
+            railway add -s backend || echo "service may already exist"
+          fi
+          railway up -s backend -c
+          # generate (or fetch) the public domain (max 1 per service)
+          DOMAIN_OUT=$(railway domain -s backend --json || railway domain -s backend || true)
           echo "domain output: $DOMAIN_OUT"
           URL=$(echo "$DOMAIN_OUT" | grep -oE '[a-zA-Z0-9.-]+\.up\.railway\.app' | head -1)
           if [ -z "$URL" ]; then

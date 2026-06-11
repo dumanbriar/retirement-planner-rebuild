@@ -1,0 +1,129 @@
+import { ArrowRight, Loader2, RotateCcw } from "lucide-react";
+import type { PlanInput } from "../../lib/types";
+import type { FieldErrors } from "../../lib/validate";
+import { Card } from "../ui/Card";
+import { HouseholdSection } from "./HouseholdSection";
+import { AccountsSection } from "./AccountsSection";
+import { LiabilitiesSection } from "./LiabilitiesSection";
+import { IncomeStreamsSection } from "./IncomeStreamsSection";
+import { SpendingSection } from "./SpendingSection";
+import { AssumptionsSection } from "./AssumptionsSection";
+
+export function PlanForm({
+  input,
+  onChange,
+  errors,
+  serverError,
+  loading,
+  onCalculate,
+  onReset,
+}: {
+  input: PlanInput;
+  onChange: (next: PlanInput) => void;
+  errors: FieldErrors;
+  serverError: string | null;
+  loading: boolean;
+  onCalculate: () => void;
+  onReset: () => void;
+}) {
+  const errorCount = Object.keys(errors).length;
+  const sectionProps = { input, onChange, errors };
+
+  return (
+    <div className="mx-auto max-w-6xl px-6 py-8">
+      <div className="mb-6">
+        <h1 className="text-xl font-semibold tracking-tight text-slate-900">
+          Build the retirement plan
+        </h1>
+        <p className="mt-1 text-sm text-slate-500">
+          Enter the household's full picture below. Every number in the resulting plan is traceable
+          — statutory rules are modeled exactly, estimates are labeled, and the audit workbook
+          reproduces the entire projection.
+        </p>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card
+          title="Household"
+          help="The people in the plan. Ages drive the timeline: contributions until each retirement age, spending and Social Security through each plan-end age."
+        >
+          <HouseholdSection {...sectionProps} />
+        </Card>
+
+        <div className="space-y-6">
+          <Card
+            title="Spending & strategy"
+            help="The core question the plan answers: can this spending level be funded for life — and which tax strategy funds it best?"
+          >
+            <SpendingSection {...sectionProps} />
+          </Card>
+          <Card
+            title="Liabilities"
+            help="Outstanding debts. Annual payments continue (with interest accruing) until each balance is paid off, and count toward spending need."
+          >
+            <LiabilitiesSection {...sectionProps} />
+          </Card>
+        </div>
+
+        <Card
+          className="lg:col-span-2"
+          title="Accounts"
+          help="All investable accounts. Type drives tax treatment; the withdrawal order in retirement is cash → taxable → tax-deferred → Roth, with HSA reserved for medical costs."
+        >
+          <AccountsSection {...sectionProps} />
+        </Card>
+
+        <Card
+          title="Other income in retirement"
+          help="Pensions, annuities, rentals, or part-time work. Amounts are in today's dollars and can be COLA-adjusted and taxable or tax-free."
+        >
+          <IncomeStreamsSection {...sectionProps} />
+        </Card>
+
+        <Card
+          title="Assumptions"
+          help="Economic and tax assumptions. Statutory parameters (brackets, RMD tables, Medicare/IRMAA, ACA schedules) are modeled exactly from 2026 law and indexed forward at your inflation assumption."
+        >
+          <AssumptionsSection {...sectionProps} />
+        </Card>
+      </div>
+
+      <div className="mt-8 flex flex-col items-center gap-3">
+        {serverError && (
+          <div className="w-full max-w-2xl whitespace-pre-line rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {serverError}
+          </div>
+        )}
+        {errorCount > 0 && (
+          <p className="text-sm font-medium text-red-600">
+            Fix {errorCount === 1 ? "1 highlighted field" : `${errorCount} highlighted fields`} to
+            continue.
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={onCalculate}
+          disabled={loading}
+          className="inline-flex items-center gap-2 rounded-lg bg-brand-900 px-8 py-3 text-base font-semibold text-white shadow-sm transition-colors hover:bg-brand-800 disabled:opacity-60"
+        >
+          {loading ? (
+            <>
+              <Loader2 className="h-5 w-5 animate-spin" /> Calculating…
+            </>
+          ) : (
+            <>
+              Calculate plan <ArrowRight className="h-5 w-5" />
+            </>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={onReset}
+          className="inline-flex items-center gap-1 text-xs font-medium text-slate-400 transition-colors hover:text-brand-700"
+        >
+          <RotateCcw className="h-3 w-3" /> Reset to sample data (Sam & Alex)
+        </button>
+      </div>
+    </div>
+  );
+}
