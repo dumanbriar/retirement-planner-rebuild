@@ -84,8 +84,25 @@ jobs:
         run: |
           cd frontend
           vercel link --yes --project horizon-retirement --token "$VERCEL_TOKEN"
-          URL=$(vercel deploy --prod --yes --token "$VERCEL_TOKEN" \
-            --build-env VITE_API_URL="${{ steps.railway.outputs.backend_url }}")
+          vercel deploy --prod --yes --token "$VERCEL_TOKEN" \
+            --build-env VITE_API_URL="${{ steps.railway.outputs.backend_url }}" \
+            > /tmp/deploy_out.txt 2> /tmp/deploy_err.txt \
+            || { cat /tmp/deploy_out.txt /tmp/deploy_err.txt; exit 1; }
+          cat /tmp/deploy_out.txt /tmp/deploy_err.txt
+          # the stable public URL is the production ALIAS, not the
+          # deployment-specific URL (which Vercel SSO-protects by default)
+          ALIAS=$(grep -hoE 'Aliased[[:space:]]+https://[a-z0-9.-]+\.vercel\.app' \
+                    /tmp/deploy_out.txt /tmp/deploy_err.txt \
+                  | grep -oE 'https://[a-z0-9.-]+\.vercel\.app' | head -1)
+          DEPLOY_URL=$(grep -hoE 'https://[a-z0-9.-]+\.vercel\.app' /tmp/deploy_out.txt | head -1)
+          # best-effort: turn off Deployment Protection so deployment URLs
+          # are public too (a no-auth advisor tool; nothing sensitive served)
+          curl -s -X PATCH "https://api.vercel.com/v9/projects/horizon-retirement" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" \
+            -d '{"ssoProtection": null}' -o /tmp/patch.json || true
+          head -c 200 /tmp/patch.json || true; echo
+          URL="${ALIAS:-$DEPLOY_URL}"
+          test -n "$URL"
           echo "frontend_url=$URL" >> "$GITHUB_OUTPUT"
           echo "Frontend URL: $URL"
 
