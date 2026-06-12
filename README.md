@@ -1,5 +1,8 @@
 # Horizon — Retirement Planner
 
+**Live app**: https://horizon-retirement-kappa.vercel.app
+**Engine API**: https://backend-production-cf36.up.railway.app (docs at `/docs`)
+
 A professional retirement planning tool for financial advisors to use live
 with clients. Deterministic, auditable, assumption-forward: every number on
 screen is reproducible from the exported Excel workbook.
