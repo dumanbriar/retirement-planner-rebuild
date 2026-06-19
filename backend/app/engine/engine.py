@@ -244,7 +244,7 @@ class Simulator:
             return 0.0
         t = acct.spec.type
         if t == AccountType.taxable:
-            frac = acct.basis / acct.balance if acct.balance > 0 else 1.0
+            frac = min(1.0, acct.basis / acct.balance) if acct.balance > 0 else 1.0
             scratch.realized_gains += take * (1 - frac)
             acct.basis -= take * frac
         elif t == AccountType.tax_deferred:
@@ -326,7 +326,7 @@ class Simulator:
                 row, prev_tax = self.retirement_year_step(
                     year, status, dividends, interest, prev_tax)
             else:
-                row = self.accumulation_year_step(year, status, dividends, interest)
+                row = self.accumulation_year_step(year, status)
 
             row.dividends = dividends
             row.interest = interest
@@ -338,6 +338,7 @@ class Simulator:
                 if acct.spec.type == AccountType.taxable:
                     acct.basis += acct.start_balance * min(
                         self.a.taxable_dividend_yield, max(acct.spec.rate(), 0.0))
+                    acct.basis = min(acct.basis, acct.balance)
 
             if not retired:
                 # annual drag, paid from the accounts (shown net in growth)
@@ -419,8 +420,7 @@ class Simulator:
         return rows, metrics
 
     # -------------------------------------------------------- accumulation yr
-    def accumulation_year_step(self, year: int, status: str,
-                               dividends: float, interest: float) -> YearRow:
+    def accumulation_year_step(self, year: int, status: str) -> YearRow:
         row = YearRow(year=year, phase="accumulation", filing_status=status,
                       ages=[self.age(i, year) if self.alive(i, year) else None
                             for i in range(len(self.persons))], accounts=[])
@@ -488,7 +488,7 @@ class Simulator:
 
         # Medicare Part B + IRMAA (2-year lookback MAGI, known by now)
         tier = irmaa_tier(self.lookback_magi(year), status, year, a.inflation)
-        medicare_premiums = irmaa_total = 0.0
+        medicare_premiums = irmaa_total = hsa_eligible_medicare = 0.0
         n_under65 = 0
         for i in range(len(self.persons)):
             if ages[i] is None:
@@ -497,12 +497,15 @@ class Simulator:
                 std, surcharge = medicare_part_b_annual(tier, year, a.healthcare_inflation)
                 medicare_premiums += std + surcharge \
                     + a.medicare_other_annual_per_person * self.hc_infl(year)
+                # HSA-qualified: Part B only; Medigap/dental excluded (IRS Pub. 969)
+                hsa_eligible_medicare += std + surcharge
                 irmaa_total += surcharge
             else:
                 n_under65 += 1
         aca_benchmark = a.aca_benchmark_monthly_per_person * 12 * n_under65 * self.hc_infl(year)
         pre65_oop = a.pre65_oop_annual_per_person * n_under65 * self.hc_infl(year)
-        hsa_eligible_costs = medicare_premiums + pre65_oop  # not ACA premiums (Pub. 969)
+        # HSA pays Part B + pre-65 OOP tax-free; ACA premiums and Medigap excluded (Pub. 969)
+        hsa_eligible_costs = hsa_eligible_medicare + pre65_oop
 
         debt_payments = sum(min(l["payment"], l["balance"] * (1 + l["rate"]))
                             for l in self.liabilities if l["balance"] > 0)
@@ -586,9 +589,8 @@ class Simulator:
             tax_res = compute_taxes(TaxYearInput(
                 year=year, filing_status=status, inflation=a.inflation,
                 ordinary_income=ordinary, ss_benefits=ss_total,
-                qualified_dividends=dividends,
-                realized_ltcg=scratch.realized_gains,
-                ages_65_plus=ages65, state_rate=a.state_tax_rate))
+                qualified_dividends=dividends, realized_ltcg=scratch.realized_gains,
+                interest=interest, ages_65_plus=ages65, state_rate=a.state_tax_rate))
             pref = min(dividends + max(0.0, scratch.realized_gains),
                        tax_res.taxable_income)
             last_ord_taxable = tax_res.taxable_income - pref

@@ -3,11 +3,15 @@
 Methodology notes (also surfaced in the Excel workbook):
 - Bracket thresholds, the standard deduction, LTCG breakpoints and IRMAA
   thresholds are 2026 statutory values (see constants.py for citations)
-  indexed forward at the plan's assumed inflation rate.
+  indexed forward at the plan's assumed inflation rate. Exception: the top
+  IRMAA income threshold ($500k single / $750k MFJ) is statutorily fixed
+  (42 U.S.C. §1395r(i)(3)(C)) and is never indexed here.
 - Social Security provisional-income thresholds and the NIIT MAGI
   thresholds are NOT indexed, per statute.
-- Qualified dividends and realized long-term gains stack on top of
-  ordinary taxable income and are taxed at 0/15/20% (IRC sec. 1(h)).
+- Qualified dividends, realized long-term gains, AND cash interest are
+  all net investment income under IRC §1411 and are included in the NIIT base.
+- ACA premium tax credit (IRC §36B) requires MAGI ≥ 100% FPL; no PTC is
+  modeled for below-poverty-line years. See aca_subsidy() for details.
 """
 from __future__ import annotations
 
@@ -31,6 +35,9 @@ class TaxYearInput:
     # preferential-rate income
     qualified_dividends: float
     realized_ltcg: float
+    # cash interest: already in ordinary_income for AGI; tracked separately
+    # so it can be included in the NIIT net-investment-income base (IRC §1411)
+    interest: float = 0.0
     ages_65_plus: int = 0         # count of filers 65+ this year
     state_rate: float = 0.0
 
@@ -49,7 +56,6 @@ class TaxYearResult:
     state_tax: float = 0.0
     total: float = 0.0
     marginal_rate: float = 0.0
-    bracket_detail: list = field(default_factory=list)
 
 
 def taxable_social_security(ss: float, other_agi: float, status: str) -> float:
@@ -67,24 +73,22 @@ def taxable_social_security(ss: float, other_agi: float, status: str) -> float:
     return min(0.85 * (provisional - t2) + tier1, 0.85 * ss)
 
 
-def _bracket_tax(taxable: float, brackets: list, scale: float) -> tuple[float, float, list]:
-    """Tax, marginal rate and per-bracket audit detail. Thresholds scaled
-    by `scale` (inflation indexing from the 2026 base year)."""
+def _bracket_tax(taxable: float, brackets: list, scale: float) -> tuple[float, float]:
+    """Tax and marginal rate. Thresholds scaled by `scale`
+    (inflation indexing from the 2026 base year)."""
     tax = 0.0
     lower = 0.0
     marginal = brackets[0][1]
-    detail = []
     for top, rate in brackets:
         top_s = top * scale if top != float("inf") else top
         if taxable > lower:
             amt = min(taxable, top_s) - lower
             tax += amt * rate
             marginal = rate
-            detail.append({"rate": rate, "amount": amt, "tax": amt * rate})
         if taxable <= top_s:
             break
         lower = top_s
-    return tax, marginal, detail
+    return tax, marginal
 
 
 def compute_taxes(inp: TaxYearInput) -> TaxYearResult:
@@ -113,8 +117,7 @@ def compute_taxes(inp: TaxYearInput) -> TaxYearResult:
     pref_taxable = min(pref_income, r.taxable_income)
     ord_taxable = r.taxable_income - pref_taxable
 
-    ord_tax, marginal, detail = _bracket_tax(ord_taxable, C.FEDERAL_BRACKETS[status], scale)
-    r.bracket_detail = detail
+    ord_tax, marginal = _bracket_tax(ord_taxable, C.FEDERAL_BRACKETS[status], scale)
 
     # LTCG/QDI stacked at 0/15/20 (IRC sec. 1(h))
     zero_top, fifteen_top = (b * scale for b in C.LTCG_BRACKETS[status])
@@ -128,7 +131,8 @@ def compute_taxes(inp: TaxYearInput) -> TaxYearResult:
     r.marginal_rate = marginal
 
     # NIIT: 3.8% on net investment income above unindexed MAGI threshold
-    nii = inp.qualified_dividends + max(0.0, inp.realized_ltcg)
+    # NII includes dividends, realized gains, AND interest (IRC §1411)
+    nii = inp.qualified_dividends + max(0.0, inp.realized_ltcg) + inp.interest
     excess = max(0.0, r.magi - C.NIIT_THRESHOLD[status])
     r.niit = C.NIIT_RATE * min(nii, excess)
 
@@ -140,11 +144,13 @@ def compute_taxes(inp: TaxYearInput) -> TaxYearResult:
 # ----------------------------- healthcare ---------------------------------
 
 def irmaa_tier(magi_two_years_prior: float, status: str, year: int, inflation: float) -> int:
-    """0-5; thresholds are 2026 values indexed at assumed inflation."""
+    """0-5; thresholds 0-3 are indexed; top threshold is statutorily fixed."""
     thresholds = C.IRMAA_THRESHOLDS[status]
     tier = 0
     for i, t in enumerate(thresholds):
-        if magi_two_years_prior > _infl(t, year, inflation):
+        # last tier ($500k single / $750k MFJ) is fixed (42 U.S.C. §1395r(i)(3)(C))
+        scaled = t if i == len(thresholds) - 1 else _infl(t, year, inflation)
+        if magi_two_years_prior > scaled:
             tier = i + 1
     return tier
 
@@ -180,9 +186,9 @@ def aca_subsidy(aca_magi: float, household_size: int, benchmark_annual: float,
     fpl = _infl(C.FPL_FIRST_PERSON + C.FPL_PER_ADDITIONAL * (household_size - 1), year, inflation)
     ratio = aca_magi / fpl if fpl > 0 else 99
     if ratio < 1.0:
-        # below 100% FPL -> Medicaid territory; treat as full benchmark
-        # subsidy in expansion states (documented estimate)
-        return benchmark_annual
+        # below 100% FPL → no PTC (IRC §36B(c)(1)(A)); household may qualify
+        # for Medicaid (expansion states) or face a coverage gap. Not modeled.
+        return 0.0
     pct = aca_applicable_pct(ratio)
     if pct is None:
         return 0.0

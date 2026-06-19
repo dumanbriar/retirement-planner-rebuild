@@ -14,7 +14,16 @@ import type { AccountType, DisplayMode, PlanResult } from "../../lib/types";
 import { ACCOUNT_TYPE_SHORT } from "../../lib/types";
 import { fmtCurrencyCompact, fmtCurrencyExact, makeDeflator } from "../../lib/format";
 import { Card } from "../ui/Card";
+import { Tooltip } from "../ui/Tooltip";
 import { AXIS_TICK, ChartTooltipShell, TooltipRow, TYPE_COLORS, agesLabel } from "./chartShared";
+
+const TYPE_HELP: Record<AccountType, string> = {
+  tax_deferred: "401(k), 403(b), Traditional IRA — pre-tax contributions; all withdrawals taxed as ordinary income.",
+  roth: "Roth IRA / Roth 401(k) — after-tax contributions; qualified withdrawals are tax-free.",
+  taxable: "Brokerage account — dividends and realized gains taxed annually; unrealized appreciation deferred.",
+  hsa: "Health Savings Account — triple tax-free: deductible contributions, tax-free growth, tax-free qualified medical withdrawals.",
+  cash: "High-yield savings, money market — interest taxed as ordinary income each year.",
+};
 
 const TYPES: AccountType[] = ["tax_deferred", "roth", "taxable", "hsa", "cash"];
 
@@ -165,10 +174,12 @@ export function NetWorthChart({
       </div>
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
         {TYPES.map((t) => (
-          <span key={t} className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: TYPE_COLORS[t] }} />
-            {ACCOUNT_TYPE_SHORT[t]}
-          </span>
+          <Tooltip key={t} content={TYPE_HELP[t]} wide>
+            <span className="flex cursor-help items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: TYPE_COLORS[t] }} />
+              {ACCOUNT_TYPE_SHORT[t]}
+            </span>
+          </Tooltip>
         ))}
         <span className="flex items-center gap-1.5">
           <span className="h-0.5 w-3 rounded bg-red-400" /> Liabilities

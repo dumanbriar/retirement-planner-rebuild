@@ -185,9 +185,21 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
                    "42 U.S.C. 1395r(i) with 2-year MAGI lookback (modeled explicitly)."},
         {"label": "ACA premium credit (pre-65)", "value": "2026 schedule w/ 400% FPL cliff",
          "kind": "estimated", "source": "Rev. Proc. 2025-25 applicable percentages; "
-                   "2025 HHS poverty guidelines. Benchmark premium is a user estimate."},
-        {"label": "NIIT", "value": "3.8% over $200k/$250k MAGI", "kind": "modeled",
-         "source": "IRC sec. 1411. Thresholds NOT indexed, by statute."},
+                   "2025 HHS poverty guidelines. Benchmark premium is a user estimate. "
+                   "IRC §36B(c)(1)(A) requires MAGI ≥ 100% FPL for any PTC; when projected "
+                   "MAGI falls below this threshold, no subsidy is modeled (household may "
+                   "qualify for Medicaid in expansion states). This can materially affect "
+                   "strategy comparisons for early retirees funded from Roth/basis/cash."},
+        {"label": "ACA below-poverty-line years", "value": "no PTC modeled",
+         "kind": "estimated",
+         "source": "IRC §36B(c)(1)(A) requires MAGI ≥ 100% FPL for PTC eligibility. "
+                   "Low-MAGI pre-65 years show $0 ACA subsidy in the audit workbook; "
+                   "actual coverage depends on state Medicaid expansion status."},
+        {"label": "NIIT", "value": "3.8% on dividends, gains & interest over $200k/$250k MAGI",
+         "kind": "modeled",
+         "source": "IRC sec. 1411. Thresholds NOT indexed, by statute. Net investment "
+                   "income includes qualified dividends, realized capital gains, and cash "
+                   "interest (all investment income under §1411(c))."},
         {"label": "Withdrawal order", "value": "cash > taxable > tax-deferred > Roth > HSA",
          "kind": "modeled", "source": "Conventional tax-efficient sequencing; HSA reserved "
                    "for qualified medical first (tax-free per IRC sec. 223)."},
@@ -203,6 +215,13 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
         {"label": "Return timing", "value": "annual, start-of-year flows",
          "kind": "modeled", "source": "Deterministic annual compounding; income recognized "
                    "on start-of-year balances. No return volatility (see sensitivity)."},
+        {"label": "Roth pre-59½ withdrawals", "value": "treated as contribution basis",
+         "kind": "estimated",
+         "source": "Roth withdrawals before age 59½ are modeled as returning contribution "
+                   "basis (no tax/penalty), per IRC §72(t)(2)(A)(i). Ordering rules for "
+                   "contributions vs. conversions vs. earnings are not tracked per-layer. "
+                   "This is optimistic for large earnings pools; Roth is last in the "
+                   "withdrawal waterfall so this edge rarely applies."},
     ]
 
 

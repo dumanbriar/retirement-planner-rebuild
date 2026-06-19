@@ -38,6 +38,14 @@ class Person(BaseModel):
     ss_monthly_at_fra: float = Field(default=0, ge=0)
     ss_claim_age: int = Field(default=67, ge=62, le=70)
 
+    @model_validator(mode="after")
+    def _check_death_vs_retirement(self) -> "Person":
+        if self.death_age <= self.retirement_age:
+            raise ValueError(
+                f"death_age ({self.death_age}) must be greater than "
+                f"retirement_age ({self.retirement_age})")
+        return self
+
 
 class Account(BaseModel):
     name: str
@@ -110,9 +118,9 @@ class Assumptions(BaseModel):
 
 class PlanInput(BaseModel):
     persons: list[Person] = Field(min_length=1, max_length=2)
-    accounts: list[Account] = Field(min_length=1)
-    liabilities: list[Liability] = Field(default_factory=list)
-    income_streams: list[IncomeStream] = Field(default_factory=list)
+    accounts: list[Account] = Field(min_length=1, max_length=20)
+    liabilities: list[Liability] = Field(default_factory=list, max_length=20)
+    income_streams: list[IncomeStream] = Field(default_factory=list, max_length=20)
     annual_spending: float = Field(gt=0)  # retirement spend goal, today's $
     assumptions: Assumptions = Field(default_factory=Assumptions)
 

@@ -12,17 +12,26 @@ import {
 import type { DisplayMode, PlanResult } from "../../lib/types";
 import { fmtCurrencyCompact, fmtCurrencyExact, makeDeflator } from "../../lib/format";
 import { Card } from "../ui/Card";
+import { Tooltip } from "../ui/Tooltip";
 import { AXIS_TICK, ChartTooltipShell, TooltipRow, agesLabel } from "./chartShared";
 
-const SERIES: { key: keyof Datum; label: string; color: string }[] = [
-  { key: "ss", label: "Social Security", color: "#1e3a5f" },
-  { key: "rmd", label: "RMDs", color: "#4f46e5" },
-  { key: "td_extra", label: "Tax-deferred withdrawals (beyond RMD)", color: "#818cf8" },
-  { key: "taxable_wd", label: "Taxable withdrawals", color: "#38bdf8" },
-  { key: "roth_wd", label: "Roth withdrawals", color: "#0d9488" },
-  { key: "hsa_wd", label: "HSA withdrawals", color: "#f59e0b" },
-  { key: "cash_wd", label: "Cash withdrawals", color: "#94a3b8" },
-  { key: "other", label: "Other income", color: "#a78bfa" },
+const SERIES: { key: keyof Datum; label: string; color: string; help: string }[] = [
+  { key: "ss", label: "Social Security", color: "#1e3a5f",
+    help: "Gross Social Security benefits (before income tax). Includes COLA adjustments." },
+  { key: "rmd", label: "RMDs", color: "#4f46e5",
+    help: "Required Minimum Distributions — mandatory withdrawals from tax-deferred accounts starting at age 73 or 75 (SECURE 2.0). Taxed as ordinary income." },
+  { key: "td_extra", label: "Tax-deferred withdrawals (beyond RMD)", color: "#818cf8",
+    help: "Discretionary withdrawals from 401(k)/IRA beyond the mandatory RMD. Includes Roth conversion amounts." },
+  { key: "taxable_wd", label: "Taxable withdrawals", color: "#38bdf8",
+    help: "Withdrawals from brokerage accounts. Only the gain portion is taxed (at long-term capital-gains rates if held >1 year)." },
+  { key: "roth_wd", label: "Roth withdrawals", color: "#0d9488",
+    help: "Tax-free withdrawals from Roth IRA / Roth 401(k). Used last in the withdrawal waterfall to preserve tax-free growth." },
+  { key: "hsa_wd", label: "HSA withdrawals", color: "#f59e0b",
+    help: "Tax-free HSA withdrawals for qualified medical expenses (Medicare Part B, out-of-pocket costs). Non-medical use is taxed." },
+  { key: "cash_wd", label: "Cash withdrawals", color: "#94a3b8",
+    help: "Withdrawals from high-yield savings or money market. Used first in the waterfall to avoid unnecessary taxes." },
+  { key: "other", label: "Other income", color: "#a78bfa",
+    help: "Pensions, annuities, part-time income, rental income, and other user-defined income streams." },
 ];
 
 interface Datum {
@@ -161,10 +170,12 @@ export function IncomeSpendingChart({
       </div>
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
         {SERIES.map((s) => (
-          <span key={s.key} className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: s.color }} />
-            {s.label.replace(" (beyond RMD)", "")}
-          </span>
+          <Tooltip key={s.key} content={s.help} wide>
+            <span className="flex cursor-help items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: s.color }} />
+              {s.label.replace(" (beyond RMD)", "")}
+            </span>
+          </Tooltip>
         ))}
         <span className="flex items-center gap-1.5">
           <span className="h-0.5 w-3 rounded bg-brand-900" /> Spending need

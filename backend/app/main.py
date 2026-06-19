@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import io
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from .engine.excel import build_workbook
 from .engine.planner import build_plan
@@ -33,6 +36,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 
 @app.get("/health")
 def health() -> dict:
@@ -40,12 +47,14 @@ def health() -> dict:
 
 
 @app.post("/api/plan", response_model=PlanResult)
-def plan(inp: PlanInput) -> PlanResult:
+@limiter.limit("10/minute")
+def plan(request: Request, inp: PlanInput) -> PlanResult:
     return build_plan(inp)
 
 
 @app.post("/api/plan/excel")
-def plan_excel(inp: PlanInput) -> StreamingResponse:
+@limiter.limit("10/minute")
+def plan_excel(request: Request, inp: PlanInput) -> StreamingResponse:
     result = build_plan(inp)
     data = build_workbook(inp, result)
     return StreamingResponse(

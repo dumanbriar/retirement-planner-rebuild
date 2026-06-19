@@ -109,6 +109,23 @@ export function ConversionTable({
           })}
         </tbody>
       </table>
+      {(() => {
+        const chosen = comparison.find((c) => c.strategy === metrics.chosen_conversion_strategy);
+        const noneRow = comparison.find((c) => c.strategy === "none");
+        if (!chosen || !noneRow || chosen.strategy === "none") return null;
+        const delta = chosen.ending_after_tax_real - noneRow.ending_after_tax_real;
+        if (delta <= 100) return null;
+        return (
+          <p className="border-t border-slate-100 px-4 py-2.5 text-xs text-slate-500">
+            {strategyLabel(chosen.strategy)} produced{" "}
+            <span className="font-medium text-slate-700">{fmtCurrency(delta)}</span> more
+            after-tax wealth than doing nothing by converting{" "}
+            <span className="font-medium text-slate-700">{fmtCurrency(chosen.total_converted)}</span>{" "}
+            total — pre-paying tax on deferred dollars at today's lower rates instead of
+            heirs' or future RMD-forced rates.
+          </p>
+        );
+      })()}
     </Card>
   );
 }

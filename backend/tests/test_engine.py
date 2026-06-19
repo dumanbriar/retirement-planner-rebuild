@@ -275,3 +275,72 @@ def test_excel_workbook_builds():
     wb = load_workbook(io.BytesIO(data))
     assert {"Summary", "Assumptions", "Accumulation", "Retirement",
             "Account Detail", "Strategies", "Sensitivity"} <= set(wb.sheetnames)
+
+
+# --------------------------------------------------------- C1: ACA below FPL
+def test_aca_below_fpl_returns_zero():
+    # below 100% FPL → no PTC (IRC §36B(c)(1)(A)); must return 0, not benchmark
+    assert aca_subsidy(5_000, 1, 20_000, 2026, 0.025) == 0.0
+    assert aca_subsidy(0, 2, 15_000, 2026, 0.025) == 0.0
+
+
+# --------------------------------------------------------- M6: NIIT + interest
+def test_niit_includes_interest():
+    # Single, ordinary_income=205k (which already includes 10k interest), no divs/gains.
+    # MAGI=205k; excess over $200k=5k; NII=10k interest; NIIT = 3.8% * min(10k, 5k) = 190.
+    # Without the fix (interest excluded from NII): NII=0 → NIIT=0. This case proves it.
+    r = compute_taxes(TaxYearInput(year=2026, filing_status="single", inflation=0.025,
+                                   ordinary_income=205_000, ss_benefits=0,
+                                   qualified_dividends=0, realized_ltcg=0,
+                                   interest=10_000))
+    assert math.isclose(r.niit, C.NIIT_RATE * 5_000, abs_tol=0.01)
+
+
+def test_niit_interest_only():
+    # Single, $210k ordinary income + $5k interest, no divs/gains
+    # NII = 5k interest; excess = 210k+5k - 200k = 15k; NIIT on min(5k, 15k) = 5k
+    r = compute_taxes(TaxYearInput(year=2026, filing_status="single", inflation=0.025,
+                                   ordinary_income=210_000, ss_benefits=0,
+                                   qualified_dividends=0, realized_ltcg=0,
+                                   interest=5_000))
+    assert math.isclose(r.niit, C.NIIT_RATE * 5_000, abs_tol=0.01)
+
+
+# --------------------------------------------------------- M7: IRMAA top tier
+def test_irmaa_top_tier_not_indexed():
+    # top single threshold is fixed at $500k regardless of year
+    # At 2.5% inflation for 10 years, $500k would become ~$641k if indexed;
+    # but the statutory cap is fixed so $490k stays in tier 4 and $510k hits tier 5
+    assert irmaa_tier(490_000, "single", 2036, 0.025) == 4
+    assert irmaa_tier(510_000, "single", 2036, 0.025) == 5
+    # top MFJ threshold fixed at $750k
+    assert irmaa_tier(740_000, "mfj", 2036, 0.025) == 4
+    assert irmaa_tier(760_000, "mfj", 2036, 0.025) == 5
+
+
+# --------------------------------------------------------- M2: death vs retirement
+def test_death_age_le_retirement_age_raises():
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        Person(name="Test", current_age=50, retirement_age=70, death_age=65)
+
+    with pytest.raises(ValidationError):
+        Person(name="Test", current_age=50, retirement_age=70, death_age=70)
+
+
+def test_death_age_gt_retirement_age_ok():
+    p = Person(name="Test", current_age=50, retirement_age=65, death_age=90)
+    assert p.death_age > p.retirement_age
+
+
+# --------------------------------------------------------- M3: input caps
+def test_accounts_max_length():
+    from pydantic import ValidationError
+    accts = [Account(name=f"IRA {i}", type=AccountType.tax_deferred,
+                     owner=0, balance=10_000) for i in range(21)]
+    with pytest.raises(ValidationError):
+        PlanInput(
+            persons=[Person(name="Jo", current_age=50, retirement_age=65, death_age=90)],
+            accounts=accts,
+            annual_spending=50_000,
+        )

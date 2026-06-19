@@ -14,6 +14,17 @@ export function AssumptionsStrip({ notes }: { notes: AssumptionNote[] }) {
         How this plan is modeled{" "}
         <span className="normal-case text-slate-400">— hover any item for its source</span>
       </p>
+      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-400">
+        <span className="flex items-center gap-1">
+          <KindBadge kind="modeled" /> statutory law, exact
+        </span>
+        <span className="flex items-center gap-1">
+          <KindBadge kind="estimated" /> engine approximation
+        </span>
+        <span className="flex items-center gap-1">
+          <KindBadge kind="assumed" /> user / plan input
+        </span>
+      </div>
       <div className="flex flex-wrap gap-1.5">
         {notes.map((n, i) => (
           <Tooltip

@@ -6,9 +6,8 @@ Sheets:
   3. Accumulation     - per-year per-account flows until retirement
   4. Retirement       - full cash-flow & tax detail for every retired year
   5. Account Detail   - start/contrib/withdraw/convert/growth/end per account-year
-  6. Tax Detail       - AGI -> taxable income -> tax, bracket by bracket inputs
-  7. Strategies       - Roth-conversion comparison + SS claiming grid
-  8. Sensitivity      - scenario table
+  6. Strategies       - Roth-conversion comparison + SS claiming grid
+  7. Sensitivity      - scenario table
 """
 from __future__ import annotations
 
@@ -16,23 +15,19 @@ import io
 from datetime import datetime, timezone
 
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from ..models import PlanInput, PlanResult
 
 MONEY = '#,##0'
-MONEY2 = '#,##0.00'
 PCT = '0.00%'
 
 HEADER_FILL = PatternFill("solid", fgColor="1E3A5F")
 HEADER_FONT = Font(color="FFFFFF", bold=True, size=10)
-PHASE_FILL = PatternFill("solid", fgColor="EEF3F8")
 WARN_FILL = PatternFill("solid", fgColor="FDE8E8")
 TITLE_FONT = Font(bold=True, size=14, color="1E3A5F")
 SUB_FONT = Font(size=9, color="666666")
-THIN = Side(style="thin", color="D9D9D9")
-BORDER = Border(bottom=THIN)
 
 
 def _sheet_header(ws, row: int, headers: list[str]):
@@ -45,7 +40,6 @@ def _sheet_header(ws, row: int, headers: list[str]):
 
 
 def _autosize(ws, widths: dict[int, int] | None = None, default: int = 13):
-    dims = ws.calculate_dimension().split(":")
     try:
         max_col = ws.max_column
     except Exception:
