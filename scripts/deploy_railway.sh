@@ -57,10 +57,32 @@ if [ "$MODE" = "project" ]; then
   DOMAIN_OUT=$(railway domain --service "$SERVICE_NAME" --json 2>/dev/null \
     || railway domain --service "$SERVICE_NAME" 2>/dev/null || true)
   echo "domain output: $DOMAIN_OUT"
-  URL=$(echo "$DOMAIN_OUT" | grep -oE '[a-zA-Z0-9.-]+\.up\.railway\.app' | head -1)
-  [ -n "$URL" ] || { echo "::error::no public domain found"; exit 1; }
-  echo "backend_url=https://$URL" >> "${GITHUB_OUTPUT:-/dev/stdout}"
-  echo "Backend URL: https://$URL"
+  # A service can expose several domains, and stale duplicates from earlier
+  # deploys can linger; the first one listed is not necessarily the live
+  # engine. Probe each domain's /api/plan (with cold-start retries) and select
+  # the one that actually serves a valid response, so we never hand a dead or
+  # stale backend URL to the health check / smoke test / Vercel build.
+  DOMAINS=$(echo "$DOMAIN_OUT" | grep -oE '[a-zA-Z0-9.-]+\.up\.railway\.app' | sort -u)
+  [ -n "$DOMAINS" ] || { echo "::error::no public domain found for service '$SERVICE_NAME'"; exit 1; }
+  REQ='{"persons":[{"name":"S","current_age":55,"retirement_age":65,"death_age":92,"ss_monthly_at_fra":2800,"ss_claim_age":67}],"accounts":[{"name":"401k","type":"tax_deferred","owner":0,"balance":850000,"annual_contribution":30000}],"annual_spending":80000,"assumptions":{"roth_conversion_strategy":"none"}}'
+  URL=""
+  for d in $DOMAINS; do
+    cand="https://$d"
+    code=""
+    for attempt in $(seq 1 18); do  # tolerate a freshly-built container warming up
+      code=$(curl -s -o /tmp/probe.json -w "%{http_code}" --max-time 20 \
+        -H "Content-Type: application/json" -d "$REQ" "$cand/api/plan" || echo 000)
+      [ "$code" = "200" ] && break
+      sleep 5
+    done
+    if [ "$code" = "200" ] && grep -q nest_egg_at_retirement /tmp/probe.json; then
+      URL="$cand"; echo "selected backend domain: $cand"; break
+    fi
+    echo "domain $cand did not serve /api/plan (last code $code): $(head -c 200 /tmp/probe.json 2>/dev/null)"
+  done
+  [ -n "$URL" ] || { echo "::error::no domain for service '$SERVICE_NAME' served a valid /api/plan (see codes/bodies above). A stale duplicate service may be shadowing the live one in Railway."; exit 1; }
+  echo "backend_url=$URL" >> "${GITHUB_OUTPUT:-/dev/stdout}"
+  echo "Backend URL: $URL"
 else
   # account/team token: GraphQL for project/service/domain, CLI for upload
   export RAILWAY_ENDPOINT="$ENDPOINT/graphql/v2"
