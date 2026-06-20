@@ -44,11 +44,18 @@ fi
 echo "== token accepted as: $MODE token via $ENDPOINT =="
 
 if [ "$MODE" = "project" ]; then
-  # project token: CLI works directly with RAILWAY_TOKEN
+  # project token: CLI works directly with RAILWAY_TOKEN. A project can hold
+  # multiple services (e.g. backend + a database), so target ours explicitly;
+  # `railway up` errors with "Multiple services found" if --service is omitted.
   cd "$(dirname "$0")/../backend"
   export RAILWAY_TOKEN="$TOKEN"
-  railway up -c || { echo "::error::railway up failed"; exit 1; }
-  DOMAIN_OUT=$(railway domain --json 2>/dev/null || railway domain 2>/dev/null || true)
+  railway up -c --service "$SERVICE_NAME" || {
+    echo "::error::railway up failed for service '$SERVICE_NAME'. If your Railway service has a different name, set the RAILWAY_SERVICE_NAME secret/variable. Available services:"
+    railway status 2>/dev/null || true
+    exit 1
+  }
+  DOMAIN_OUT=$(railway domain --service "$SERVICE_NAME" --json 2>/dev/null \
+    || railway domain --service "$SERVICE_NAME" 2>/dev/null || true)
   echo "domain output: $DOMAIN_OUT"
   URL=$(echo "$DOMAIN_OUT" | grep -oE '[a-zA-Z0-9.-]+\.up\.railway\.app' | head -1)
   [ -n "$URL" ] || { echo "::error::no public domain found"; exit 1; }
