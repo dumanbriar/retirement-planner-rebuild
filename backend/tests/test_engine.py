@@ -14,8 +14,9 @@ from app.engine.planner import build_plan
 from app.engine.taxes import (TaxYearInput, aca_applicable_pct, aca_subsidy,
                               compute_taxes, irmaa_tier,
                               taxable_social_security)
-from app.models import (Account, AccountType, Assumptions, ConversionStrategy,
-                        Liability, Person, PlanInput)
+from app.engine.planner import SPLIT_LEVELS, apply_split
+from app.models import (Account, AccountType, AccountVehicle, Assumptions,
+                        ConversionStrategy, Liability, Person, PlanInput)
 
 
 # ----------------------------------------------------------- federal tax
@@ -420,3 +421,159 @@ def test_existing_liability_backward_compatible():
     # active from year 1, no down-payment event ever
     assert rows[0].total_liabilities > 0
     assert all(y.home_purchase == 0 for y in rows)
+
+
+# -------------------------------- surplus reinvestment conservation (regression)
+def test_no_phantom_surplus_from_rmds():
+    # Regression: forced RMDs were double-counted as available resources in the
+    # retirement surplus calc (once as rmd_total, once inside withdrawals_by_type),
+    # minting phantom money in high-RMD years. Per-year wealth must be conserved:
+    # end = start + growth - (spend+healthcare+tax+debt+home) + (ss+other).
+    plan = PlanInput(
+        persons=[Person(name="Rich", current_age=72, retirement_age=73, death_age=92,
+                        ss_monthly_at_fra=3000, ss_claim_age=70)],
+        accounts=[Account(name="Big 401k", type=AccountType.tax_deferred, owner=0,
+                          balance=3_000_000, annual_contribution=0, expected_return=0.06),
+                  Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                          balance=100_000, cost_basis=100_000, annual_contribution=0)],
+        annual_spending=80_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none))
+    rows, m = Simulator(plan, strategy=ConversionStrategy.none).run()
+    ret = [y for y in rows if y.phase == "retirement"]
+    assert any(y.rmd_total > 80_000 for y in ret)  # genuinely large forced RMDs
+    assert not m.depleted
+    for y in ret:
+        start = sum(a.start_balance for a in y.accounts)
+        growth = sum(a.growth for a in y.accounts)
+        end = sum(a.end_balance for a in y.accounts)
+        outflow = y.spend_goal + y.healthcare_cost + y.total_tax \
+            + y.debt_payments + y.home_purchase
+        inflow = y.ss_total + y.other_income
+        assert math.isclose(end, start + growth - outflow + inflow,
+                            rel_tol=0.01, abs_tol=1500), f"{y.year}"
+
+
+# --------------------------------- Roth-vs-Traditional contribution split
+def _saver(salary, roth_c=10_000, td_c=10_000, **akw):
+    a = dict(roth_conversion_strategy=ConversionStrategy.none,
+             optimize_contribution_split=True)
+    a.update(akw)
+    return PlanInput(
+        persons=[Person(name="Jo", current_age=40, retirement_age=65, death_age=90,
+                        ss_monthly_at_fra=2500, ss_claim_age=67, salary=salary)],
+        accounts=[
+            Account(name="401k", type=AccountType.tax_deferred, owner=0,
+                    vehicle=AccountVehicle.employer, balance=200_000,
+                    annual_contribution=td_c, expected_return=0.06),
+            Account(name="Roth 401k", type=AccountType.roth, owner=0,
+                    vehicle=AccountVehicle.employer, balance=50_000,
+                    annual_contribution=roth_c, expected_return=0.06),
+            Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                    balance=50_000, cost_basis=50_000, annual_contribution=0,
+                    expected_return=0.06),
+        ],
+        annual_spending=70_000, assumptions=Assumptions(**a))
+
+
+def test_split_low_bracket_favors_roth():
+    # A low current bracket means paying tax now (Roth) beats deferring it.
+    r = build_plan(_saver(salary=40_000))
+    assert r.metrics.chosen_contribution_split == [1.0]
+
+
+def test_split_high_bracket_favors_traditional():
+    # A high current bracket makes the deduction worth more than tax-free growth.
+    r = build_plan(_saver(salary=300_000))
+    assert r.metrics.chosen_contribution_split == [0.0]
+
+
+def test_split_reports_all_candidates_and_marks_current():
+    r = build_plan(_saver(salary=90_000))
+    assert len(r.contribution_split) >= len(SPLIT_LEVELS)
+    pcts = {round(c.roth_pct[0], 2) for c in r.contribution_split}
+    assert {0.0, 0.5, 1.0} <= pcts
+    # current allocation is 10k/20k = 50% Roth and must be flagged exactly once
+    current = [c for c in r.contribution_split if c.is_current]
+    assert len(current) == 1 and current[0].roth_pct == [0.5]
+
+
+def test_invest_the_tax_savings_reinvested():
+    # The Traditional deduction's tax saving is reinvested in taxable; Roth has
+    # no deduction, so nothing is reinvested during accumulation.
+    plan = _saver(salary=200_000)
+    trad = Simulator(apply_split(plan, [0.0]), strategy=ConversionStrategy.none).run()[0]
+    roth = Simulator(apply_split(plan, [1.0]), strategy=ConversionStrategy.none).run()[0]
+    acc_trad = sum(y.surplus_reinvested for y in trad if y.phase == "accumulation")
+    acc_roth = sum(y.surplus_reinvested for y in roth if y.phase == "accumulation")
+    assert acc_roth == 0
+    assert acc_trad > 0
+
+
+def test_salary_populates_accumulation_tax_fields():
+    plan = _saver(salary=150_000, optimize_contribution_split=False)
+    rows = Simulator(plan, strategy=ConversionStrategy.none).run()[0]
+    acc = [y for y in rows if y.phase == "accumulation"]
+    assert acc and all(y.agi > 0 and y.federal_tax > 0 and y.marginal_rate > 0
+                       for y in acc)
+
+
+def test_no_salary_keeps_legacy_flat_path():
+    # Backward compatibility: with no salary the legacy flat-rate accumulation
+    # path runs and the new income-tax fields stay unpopulated.
+    plan = _saver(salary=0, optimize_contribution_split=False)
+    rows = Simulator(plan, strategy=ConversionStrategy.none).run()[0]
+    acc = [y for y in rows if y.phase == "accumulation"]
+    assert acc and all(y.agi == 0 and y.federal_tax == 0 and y.taxable_income == 0
+                       for y in acc)
+
+
+def _one_account_plan(acct: Account, salary=120_000) -> PlanInput:
+    return PlanInput(
+        persons=[Person(name="Jo", current_age=40, retirement_age=65,
+                        death_age=90, salary=salary)],
+        accounts=[acct, Account(name="Tx", type=AccountType.taxable, owner=0,
+                                balance=10_000, cost_basis=10_000)],
+        annual_spending=60_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none))
+
+
+def test_employer_vehicle_uses_elective_not_ira_limit():
+    # $20k is fine in a 401k (under the elective-deferral limit) but exceeds the
+    # IRA limit — the cap must follow the vehicle, not assume IRA.
+    emp = build_plan(_one_account_plan(Account(
+        name="401k", type=AccountType.tax_deferred, owner=0,
+        vehicle=AccountVehicle.employer, balance=100_000,
+        annual_contribution=20_000, expected_return=0.06)))
+    ira = build_plan(_one_account_plan(Account(
+        name="IRA", type=AccountType.tax_deferred, owner=0,
+        vehicle=AccountVehicle.ira, balance=100_000,
+        annual_contribution=20_000, expected_return=0.06)))
+    assert not any("exceed" in w for w in emp.warnings)
+    assert any("IRA limit" in w for w in ira.warnings)
+
+
+def test_backdoor_roth_flagged_for_high_earner():
+    # High MAGI + a Roth IRA contribution -> allowed but flagged as a backdoor;
+    # a Roth 401(k) at the same income has no income limit, so no flag.
+    ira = build_plan(_one_account_plan(Account(
+        name="Roth IRA", type=AccountType.roth, owner=0,
+        vehicle=AccountVehicle.ira, balance=50_000,
+        annual_contribution=7_000, expected_return=0.06), salary=400_000))
+    emp = build_plan(_one_account_plan(Account(
+        name="Roth 401k", type=AccountType.roth, owner=0,
+        vehicle=AccountVehicle.employer, balance=50_000,
+        annual_contribution=7_000, expected_return=0.06), salary=400_000))
+    assert any("backdoor" in w.lower() for w in ira.warnings)
+    assert not any("backdoor" in w.lower() for w in emp.warnings)
+
+
+def test_apply_split_preserves_vehicle_totals():
+    plan = _saver(salary=100_000)  # 10k Roth + 10k Trad in the employer bucket
+    for pct in (0.0, 0.5, 1.0):
+        p2 = apply_split(plan, [pct])
+        emp = [a for a in p2.accounts if a.owner == 0
+               and a.type in (AccountType.tax_deferred, AccountType.roth)
+               and a.limit_vehicle() == AccountVehicle.employer]
+        assert math.isclose(sum(a.annual_contribution for a in emp), 20_000, abs_tol=1)
+        roth = sum(a.annual_contribution for a in emp if a.type == AccountType.roth)
+        assert math.isclose(roth, 20_000 * pct, abs_tol=1)

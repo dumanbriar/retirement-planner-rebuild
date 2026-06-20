@@ -194,7 +194,9 @@ export function Sidebar({
           hasError={!!errors["annual_spending"] || hasErr("assumptions.custom_conversion")}
           summary={`${fmtCurrency(input.annual_spending)}/yr · Roth: ${
             CONVERSION_STRATEGY_LABELS[input.assumptions.roth_conversion_strategy]
-          }${input.assumptions.optimize_ss_claiming ? " · SS optimized" : ""}`}
+          }${input.assumptions.optimize_ss_claiming ? " · SS optimized" : ""}${
+            input.assumptions.optimize_contribution_split ? " · split optimized" : ""
+          }`}
         >
           <SpendingSection {...sectionProps} />
         </SectionAccordion>

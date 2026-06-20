@@ -188,6 +188,48 @@ EARLY_WITHDRAWAL_PENALTY = 0.10
 EARLY_WITHDRAWAL_AGE = 60  # whole-year approximation of 59.5, documented
 
 # ---------------------------------------------------------------------------
+# Retirement-contribution limits, tax year 2026. Indexed annually; the engine
+# grows them by the plan inflation assumption from this base year (the IRS uses
+# rounded chained-CPI steps). Source: IRS Notice 2025-67 (2026 COLA limits).
+# These cap the Roth-vs-Traditional split optimizer's allocations and drive its
+# limit warnings. VERIFY against the IRS notice when updating.
+#
+# 402(g) elective-deferral limit (401(k)/403(b)/457(b)) applies per person
+# across BOTH pre-tax and Roth deferrals within employer plans combined.
+ELECTIVE_DEFERRAL_LIMIT = 24_500
+ELECTIVE_DEFERRAL_CATCHUP_50 = 8_000       # age 50+ catch-up (IRC sec. 414(v))
+ELECTIVE_DEFERRAL_CATCHUP_60_63 = 11_250   # ages 60-63 (SECURE 2.0 sec. 109)
+# IRA limit (IRC sec. 219) applies per person across traditional + Roth IRA.
+IRA_CONTRIBUTION_LIMIT = 7_500
+IRA_CATCHUP_50 = 1_100                      # age 50+ (SECURE 2.0 sec. 108, indexed)
+# Roth IRA contribution MAGI phase-out ranges (IRC sec. 408A(c)(3)): direct
+# Roth IRA contributions phase out across (start, end); above `end` a direct
+# contribution is disallowed and a backdoor Roth is required. NOT applicable to
+# Roth 401(k) (employer Roth has no income limit).
+ROTH_IRA_PHASEOUT = {
+    "single": (150_000, 165_000),
+    "mfj": (236_000, 246_000),
+}
+
+
+def elective_deferral_limit(age: int) -> float:
+    """402(g) elective-deferral limit for a person of this age (base-year $)."""
+    limit = ELECTIVE_DEFERRAL_LIMIT
+    if 60 <= age <= 63:
+        limit += ELECTIVE_DEFERRAL_CATCHUP_60_63
+    elif age >= 50:
+        limit += ELECTIVE_DEFERRAL_CATCHUP_50
+    return float(limit)
+
+
+def ira_contribution_limit(age: int) -> float:
+    """IRA contribution limit for a person of this age (base-year $)."""
+    limit = IRA_CONTRIBUTION_LIMIT
+    if age >= 50:
+        limit += IRA_CATCHUP_50
+    return float(limit)
+
+# ---------------------------------------------------------------------------
 # Freshness metadata: when each constant group was last verified against its
 # primary source, and how often it is expected to change.
 # update_cycle values:
@@ -249,6 +291,16 @@ CONSTANT_METADATA: dict[str, dict[str, str]] = {
         "last_updated": "2025-07-04",
         "update_cycle": "legislative",
         "review_url": "https://www.congress.gov/bill/119th-congress/house-bill/1",
+    },
+    "contribution_limits": {
+        "last_updated": "2025-11-01",
+        "update_cycle": "annual-november",
+        "review_url": "https://www.irs.gov/retirement-plans/cost-of-living-adjustments-for-retirement-items",
+    },
+    "roth_ira_phaseout": {
+        "last_updated": "2025-11-01",
+        "update_cycle": "annual-november",
+        "review_url": "https://www.irs.gov/retirement-plans/amount-of-roth-ira-contributions-that-you-can-make-for-2026",
     },
 }
 

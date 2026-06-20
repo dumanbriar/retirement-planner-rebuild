@@ -6,7 +6,8 @@ Sheets:
   3. Accumulation     - per-year per-account flows until retirement
   4. Retirement       - full cash-flow & tax detail for every retired year
   5. Account Detail   - start/contrib/withdraw/convert/growth/end per account-year
-  6. Strategies       - Roth-conversion comparison + SS claiming grid
+  6. Strategies       - Roth-conversion comparison, SS claiming grid,
+                        Traditional-vs-Roth contribution split
   7. Sensitivity      - scenario table
 """
 from __future__ import annotations
@@ -287,6 +288,29 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
             vals = list(cell_.claim_ages) + [cell_.ending_after_tax_real,
                                              cell_.depletion_age or "",
                                              "<= chosen" if cell_.claim_ages == m.ss_claim_ages else ""]
+            for c, v in enumerate(vals, 1):
+                xc = ws.cell(row=r, column=c, value=v)
+                if isinstance(v, float):
+                    xc.number_format = MONEY
+            r += 1
+    if result.contribution_split:
+        r += 2
+        ws.cell(row=r, column=1,
+                value="Traditional vs. Roth contribution split "
+                      "(objective: ending after-tax wealth, today's $)").font = TITLE_FONT
+        r += 1
+        _sheet_header(ws, r, [f"{p.name} % to Roth" for p in persons] +
+                      ["Ending after-tax wealth (today's $)",
+                       "Lifetime taxes (today's $)", "Depleted at age",
+                       "Current", "Chosen"])
+        r += 1
+        chosen = [round(x, 4) for x in m.chosen_contribution_split]
+        for cell_ in result.contribution_split:
+            vals = [round(x * 100) for x in cell_.roth_pct] + [
+                cell_.ending_after_tax_real, cell_.lifetime_taxes_real,
+                cell_.depletion_age or "",
+                "current" if cell_.is_current else "",
+                "<= chosen" if [round(x, 4) for x in cell_.roth_pct] == chosen else ""]
             for c, v in enumerate(vals, 1):
                 xc = ws.cell(row=r, column=c, value=v)
                 if isinstance(v, float):

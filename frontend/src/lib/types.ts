@@ -25,6 +25,15 @@ export const ACCOUNT_TYPE_SHORT: Record<AccountType, string> = {
   cash: "Cash",
 };
 
+/** Contribution-limit regime for a tax-advantaged retirement account. Drives
+ * which IRS limit applies and the backdoor-Roth check — NOT withdrawal tax. */
+export type AccountVehicle = "employer" | "ira";
+
+export const ACCOUNT_VEHICLE_LABELS: Record<AccountVehicle, string> = {
+  employer: "Employer plan (401k/403b)",
+  ira: "IRA",
+};
+
 /** Default expected returns by account type (mirrors DEFAULT_RETURNS). */
 export const DEFAULT_RETURNS: Record<AccountType, number> = {
   tax_deferred: 0.06,
@@ -42,6 +51,9 @@ export interface Person {
   /** Monthly SS benefit at full retirement age (PIA from an SSA statement), today's $. */
   ss_monthly_at_fra: number;
   ss_claim_age: number; // 62..70
+  /** Gross annual earned income (today's $), 0 if not working. Provides the
+   * marginal-bracket context for the Roth-vs-Traditional contribution decision. */
+  salary: number;
 }
 
 export interface Account {
@@ -49,6 +61,8 @@ export interface Account {
   type: AccountType;
   owner: number; // index into persons (0 or 1)
   balance: number;
+  /** tax_deferred / roth only: which contribution limit applies. null => employer. */
+  vehicle?: AccountVehicle | null;
   /** Taxable accounts only: cost basis today (null => defaults to balance). */
   cost_basis: number | null;
   annual_contribution: number;
@@ -111,6 +125,8 @@ export interface Assumptions {
   roth_conversion_strategy: ConversionStrategy;
   custom_conversion_amount: number;
   optimize_ss_claiming: boolean;
+  /** Exhaustively compare per-person Traditional-vs-Roth contribution splits. */
+  optimize_contribution_split: boolean;
   /** Pre-65 ACA modeling (estimates, clearly labeled). */
   aca_benchmark_monthly_per_person: number;
   pre65_oop_annual_per_person: number;
@@ -210,6 +226,8 @@ export interface Metrics {
   success: boolean;
   chosen_conversion_strategy: string;
   ss_claim_ages: number[];
+  /** Per-person Roth fraction under the chosen split ([] if not optimized). */
+  chosen_contribution_split: number[];
 }
 
 export interface SensitivityRow {
@@ -234,6 +252,15 @@ export interface SSGridCell {
   claim_ages: number[];
   ending_after_tax_real: number;
   depletion_age: number | null;
+}
+
+export interface ContributionSplitCell {
+  /** Per-person fraction of the contribution budget routed to Roth. */
+  roth_pct: number[];
+  ending_after_tax_real: number;
+  lifetime_taxes_real: number;
+  depletion_age: number | null;
+  is_current: boolean;
 }
 
 export type AssumptionKind = "modeled" | "estimated" | "assumed";
@@ -265,6 +292,7 @@ export interface PlanResult {
   sensitivity: SensitivityRow[];
   conversion_comparison: StrategyComparison[];
   ss_grid: SSGridCell[];
+  contribution_split: ContributionSplitCell[];
   warnings: string[];
   assumption_notes: AssumptionNote[];
 }

@@ -19,6 +19,16 @@ class AccountType(str, Enum):
     cash = "cash"                  # high-yield savings / cash
 
 
+class AccountVehicle(str, Enum):
+    """The contribution-limit regime for a tax-advantaged retirement account.
+    Does NOT affect withdrawal taxation (that is driven by `type`); it only
+    selects which IRS contribution limit applies and whether the Roth-IRA
+    income phase-out (and the backdoor-Roth flag) is in play.
+    """
+    employer = "employer"  # 401(k)/403(b)/457(b): IRC 402(g) elective-deferral limit
+    ira = "ira"            # traditional/Roth IRA: IRC 219 limit; Roth IRA MAGI phase-out
+
+
 DEFAULT_RETURNS = {
     AccountType.tax_deferred: 0.06,
     AccountType.roth: 0.06,
@@ -37,6 +47,10 @@ class Person(BaseModel):
     # (the PIA from an SSA statement), in today's dollars.
     ss_monthly_at_fra: float = Field(default=0, ge=0)
     ss_claim_age: int = Field(default=67, ge=62, le=70)
+    # Current gross annual earned income (today's dollars), 0 if not working.
+    # Provides the real marginal-bracket context for the Roth-vs-Traditional
+    # contribution decision; grows with plan inflation while this person works.
+    salary: float = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def _check_death_vs_retirement(self) -> "Person":
@@ -52,6 +66,9 @@ class Account(BaseModel):
     type: AccountType
     owner: int = Field(default=0, ge=0, le=1)  # index into persons
     balance: float = Field(ge=0)
+    # tax_deferred / roth only: which IRS contribution limit applies. None is
+    # treated as an employer plan (the higher elective-deferral limit).
+    vehicle: Optional[AccountVehicle] = None
     # Taxable accounts only: cost basis today (defaults to balance).
     cost_basis: Optional[float] = Field(default=None, ge=0)
     annual_contribution: float = Field(default=0, ge=0)
@@ -59,6 +76,10 @@ class Account(BaseModel):
 
     def rate(self) -> float:
         return self.expected_return if self.expected_return is not None else DEFAULT_RETURNS[self.type]
+
+    def limit_vehicle(self) -> AccountVehicle:
+        """Vehicle for limit purposes; defaults to employer when unspecified."""
+        return self.vehicle if self.vehicle is not None else AccountVehicle.employer
 
 
 class Liability(BaseModel):
@@ -111,6 +132,10 @@ class Assumptions(BaseModel):
     roth_conversion_strategy: ConversionStrategy = ConversionStrategy.auto
     custom_conversion_amount: float = Field(default=0, ge=0)
     optimize_ss_claiming: bool = False
+    # When True, exhaustively compares Traditional-vs-Roth contribution splits
+    # (per person) and selects the one with the highest ending after-tax wealth.
+    # Meaningful only when salaries are provided (the deduction needs a bracket).
+    optimize_contribution_split: bool = False
     # Pre-65 ACA modeling (estimates, clearly labeled in UI/workbook).
     aca_benchmark_monthly_per_person: float = Field(default=850, ge=0)
     pre65_oop_annual_per_person: float = Field(default=2_500, ge=0)
@@ -223,6 +248,9 @@ class Metrics(BaseModel):
     success: bool
     chosen_conversion_strategy: str
     ss_claim_ages: list[int]
+    # Per-person fraction of the retirement-contribution budget routed to Roth
+    # under the chosen split (empty when the split optimizer was not run).
+    chosen_contribution_split: list[float] = []
 
 
 class SensitivityRow(BaseModel):
@@ -249,11 +277,25 @@ class SSGridCell(BaseModel):
     depletion_age: Optional[int]
 
 
+class ContributionSplitCell(BaseModel):
+    """One evaluated Traditional-vs-Roth contribution split (a full re-sim).
+
+    `roth_pct` is per person: the fraction of that person's combined
+    Traditional+Roth annual contribution routed to Roth.
+    """
+    roth_pct: list[float]
+    ending_after_tax_real: float
+    lifetime_taxes_real: float
+    depletion_age: Optional[int]
+    is_current: bool = False  # matches the household's current allocation
+
+
 class PlanResult(BaseModel):
     metrics: Metrics
     years: list[YearRow]
     sensitivity: list[SensitivityRow]
     conversion_comparison: list[StrategyComparison]
     ss_grid: list[SSGridCell] = []
+    contribution_split: list[ContributionSplitCell] = []
     warnings: list[str] = []
     assumption_notes: list[dict[str, str]] = []  # label/value/source triples

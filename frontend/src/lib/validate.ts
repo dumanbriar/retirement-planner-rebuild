@@ -24,6 +24,7 @@ export function validatePlanInput(input: PlanInput): FieldErrors {
       errors[k("death_age")] = "Plan-end age must be after current age.";
     if (!(p.ss_monthly_at_fra >= 0)) errors[k("ss_monthly_at_fra")] = "Must be ≥ 0.";
     if (!inRange(p.ss_claim_age, 62, 70)) errors[k("ss_claim_age")] = "Claiming age must be 62–70.";
+    if (!(p.salary >= 0)) errors[k("salary")] = "Salary must be ≥ 0.";
   });
 
   if (input.accounts.length === 0) errors["accounts"] = "Add at least one account.";

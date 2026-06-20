@@ -11,6 +11,7 @@ import { IncomeSpendingChart } from "./IncomeSpendingChart";
 import { TaxChart } from "./TaxChart";
 import { ConversionTable } from "./ConversionTable";
 import { SSGridTable } from "./SSGridTable";
+import { ContributionSplitTable } from "./ContributionSplitTable";
 import { SensitivityTable } from "./SensitivityTable";
 import { YearTable } from "./YearTable";
 
@@ -105,6 +106,12 @@ export function Dashboard({
       </div>
 
       <ConversionTable comparison={result.conversion_comparison} metrics={result.metrics} />
+
+      <ContributionSplitTable
+        cells={result.contribution_split}
+        metrics={result.metrics}
+        personNames={personNames}
+      />
 
       <SSGridTable grid={result.ss_grid} metrics={result.metrics} personNames={personNames} />
 
