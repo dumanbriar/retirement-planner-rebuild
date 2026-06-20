@@ -186,7 +186,8 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
     ws["A1"] = "Retirement Phase — full cash-flow and tax detail"
     ws["A1"].font = TITLE_FONT
     headers = (["Year"] + age_cols +
-               ["Filing", "Spend goal", "Debt pmts", "Home purchase", "Healthcare (net)",
+               ["Filing", "Contributions", "Growth (net of drag)",
+                "Spend goal", "Debt pmts", "Home purchase", "Healthcare (net)",
                 "ACA subsidy", "IRMAA", "SS gross", "Taxable SS", "Other income",
                 "RMD", "W/D cash", "W/D taxable", "W/D tax-def", "W/D Roth",
                 "W/D HSA", "Roth conversion", "Realized gains", "Dividends",
@@ -202,9 +203,12 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
             continue
         wbt = y.withdrawals_by_type
         hsa_wd = sum(ac.withdrawal for ac in y.accounts if ac.type.value == "hsa")
+        contrib = sum(ac.contribution for ac in y.accounts) - y.surplus_reinvested
+        growth = sum(ac.growth for ac in y.accounts)
         vals = ([y.year] + [y.ages[i] if i < len(y.ages) else None
                             for i in range(len(persons))] +
-                [y.filing_status, y.spend_goal, y.debt_payments, y.home_purchase,
+                [y.filing_status, contrib, growth,
+                 y.spend_goal, y.debt_payments, y.home_purchase,
                  y.healthcare_cost,
                  y.aca_subsidy, y.irmaa_surcharge, y.ss_total, y.taxable_ss,
                  y.other_income, y.rmd_total, wbt.get("cash", 0.0),

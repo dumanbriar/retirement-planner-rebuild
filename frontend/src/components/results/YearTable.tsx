@@ -55,6 +55,8 @@ export function YearTable({
         help: "Accumulation while anyone is still working and contributing; retirement once drawdown begins.",
         value: (y) => (y.phase === "accumulation" ? "accum" : "retire"),
       },
+      { label: "Contrib.", help: "New money contributed to accounts this year (excludes reinvested surplus / Social Security, shown under their own columns).", ...money((y) => y.accounts.reduce((s, a) => s + a.contribution, 0) - y.surplus_reinvested) },
+      { label: "Growth", help: "Investment growth across all accounts, net of any pre-retirement dividend/interest tax drag.", ...money((y) => y.accounts.reduce((s, a) => s + a.growth, 0)) },
       { label: "Spending", help: "Lifestyle spending goal for the year (the inflated annual spending input). Excludes healthcare, debt, and taxes, shown separately.", ...money((y) => y.spend_goal) },
       { label: "Healthcare", help: "Net healthcare cost: ACA premiums minus subsidies before 65; Medicare Part B (incl. IRMAA) plus other premiums/OOP after 65.", ...money((y) => y.healthcare_cost) },
       { label: "Debt pay", help: "Liability payments made this year.", ...money((y) => y.debt_payments) },
@@ -102,7 +104,7 @@ export function YearTable({
       bodyClassName="p-0"
     >
       <div className="max-h-[480px] overflow-auto">
-        <table className="w-full min-w-[1480px] text-xs">
+        <table className="w-full min-w-[1600px] text-xs">
           <thead className="sticky top-0 z-10 bg-slate-50 shadow-[0_1px_0_#e2e8f0]">
             <tr className="text-[11px] uppercase tracking-wide text-slate-500">
               {cols.map((c) => (
