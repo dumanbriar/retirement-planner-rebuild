@@ -153,7 +153,7 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
     def fpct(v):
         s = f"{v * 100:g}%"
         return s
-    return [
+    notes = [
         {"label": "Base parameter year", "value": str(C.BASE_YEAR),
          "kind": "modeled",
          "source": "All statutory amounts are 2026 values; see per-item sources below."},
@@ -223,6 +223,23 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
                    "This is optimistic for large earnings pools; Roth is last in the "
                    "withdrawal waterfall so this edge rarely applies."},
     ]
+    # Attach freshness metadata (last_updated, stale, review_url) to matched notes
+    _NOTE_KEY_MAP = {
+        "Federal brackets & standard deduction": "federal_brackets",
+        "LTCG/qualified dividend brackets": "ltcg_brackets",
+        "Medicare Part B + IRMAA": "medicare_part_b",
+        "ACA premium credit (pre-65)": "aca_applicable_pct",
+        "RMDs": "rmd_ages",
+    }
+    freshness = {f["key"]: f for f in C.constants_freshness()}
+    for note in notes:
+        key = _NOTE_KEY_MAP.get(note["label"])
+        if key and key in freshness:
+            f = freshness[key]
+            note["last_updated"] = f["last_updated"]
+            note["stale"] = "true" if f["stale"] else "false"
+            note["review_url"] = f["review_url"]
+    return notes
 
 
 def build_plan(plan: PlanInput) -> PlanResult:

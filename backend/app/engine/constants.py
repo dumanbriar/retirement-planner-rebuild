@@ -186,3 +186,104 @@ HSA_PENALTY_END_AGE = 65
 # before the owner's age-60 year (whole-year model) and flags it in output.
 EARLY_WITHDRAWAL_PENALTY = 0.10
 EARLY_WITHDRAWAL_AGE = 60  # whole-year approximation of 59.5, documented
+
+# ---------------------------------------------------------------------------
+# Freshness metadata: when each constant group was last verified against its
+# primary source, and how often it is expected to change.
+# update_cycle values:
+#   "annual-october"  — IRS Rev. Proc., typically released each October
+#   "annual-november" — CMS Medicare announcement, each November
+#   "annual-january"  — HHS FPL guidelines, each January
+#   "annual-may"      — IRS ACA applicable-% Rev. Proc., each spring
+#   "legislative"     — changes only when Congress acts; never auto-stale
+# When you update a constant, update last_updated to today's ISO date and
+# update the review_url to point at the specific document you used.
+# ---------------------------------------------------------------------------
+CONSTANT_METADATA: dict[str, dict[str, str]] = {
+    "federal_brackets": {
+        "last_updated": "2025-10-09",
+        "update_cycle": "annual-october",
+        "review_url": "https://www.irs.gov/pub/irs-drop/rp-25-32.pdf",
+    },
+    "standard_deduction": {
+        "last_updated": "2025-10-09",
+        "update_cycle": "annual-october",
+        "review_url": "https://www.irs.gov/pub/irs-drop/rp-25-32.pdf",
+    },
+    "ltcg_brackets": {
+        "last_updated": "2025-10-09",
+        "update_cycle": "annual-october",
+        "review_url": "https://www.irs.gov/pub/irs-drop/rp-25-32.pdf",
+    },
+    "irmaa_thresholds": {
+        "last_updated": "2025-11-01",
+        "update_cycle": "annual-november",
+        "review_url": "https://www.cms.gov/newsroom/fact-sheets/2026-medicare-parts-b-premiums-and-deductibles",
+    },
+    "medicare_part_b": {
+        "last_updated": "2025-11-01",
+        "update_cycle": "annual-november",
+        "review_url": "https://www.cms.gov/newsroom/fact-sheets/2026-medicare-parts-b-premiums-and-deductibles",
+    },
+    "fpl": {
+        "last_updated": "2025-01-22",
+        "update_cycle": "annual-january",
+        "review_url": "https://aspe.hhs.gov/topics/poverty-economic-mobility/poverty-guidelines",
+    },
+    "aca_applicable_pct": {
+        "last_updated": "2025-05-01",
+        "update_cycle": "annual-may",
+        "review_url": "https://www.irs.gov/pub/irs-drop/rp-25-25.pdf",
+    },
+    "rmd_ages": {
+        "last_updated": "2024-07-01",
+        "update_cycle": "legislative",
+        "review_url": "https://www.irs.gov/retirement-plans/retirement-plan-and-ira-required-minimum-distributions-faqs",
+    },
+    "uniform_lifetime_table": {
+        "last_updated": "2022-01-01",
+        "update_cycle": "legislative",
+        "review_url": "https://www.irs.gov/pub/irs-tege/uniform_rmd_wksht.pdf",
+    },
+    "senior_bonus": {
+        "last_updated": "2025-07-04",
+        "update_cycle": "legislative",
+        "review_url": "https://www.congress.gov/bill/119th-congress/house-bill/1",
+    },
+}
+
+
+def constants_freshness(today=None) -> list[dict]:
+    """Return per-group freshness records with computed staleness flags.
+
+    `today` can be overridden (accepts datetime.date) for testing.
+    """
+    from datetime import date as _date
+    if today is None:
+        today = _date.today()
+    _CYCLE_MONTH = {
+        "annual-october": 10,
+        "annual-november": 11,
+        "annual-january": 1,
+        "annual-may": 5,
+    }
+    results = []
+    for key, meta in CONSTANT_METADATA.items():
+        lu = _date.fromisoformat(meta["last_updated"])
+        cycle = meta["update_cycle"]
+        stale = False
+        if cycle in _CYCLE_MONTH:
+            month = _CYCLE_MONTH[cycle]
+            # Due date is the review month of the year after last_updated
+            due_year = lu.year + 1
+            due_day = 15 if month == 1 else 1
+            due = _date(due_year, month, due_day)
+            stale = today >= due
+        results.append({
+            "key": key,
+            "last_updated": meta["last_updated"],
+            "update_cycle": cycle,
+            "review_url": meta["review_url"],
+            "stale": stale,
+        })
+    return results

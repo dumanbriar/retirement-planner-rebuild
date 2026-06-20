@@ -238,6 +238,20 @@ export interface AssumptionNote {
   value: string;
   kind: AssumptionKind | string;
   source: string;
+  /** ISO date the developer last verified this value against a primary source. */
+  last_updated?: string;
+  /** "true" when the value is likely due for annual review based on calendar logic. */
+  stale?: "true" | "false";
+  /** URL of the primary source document to check for an updated value. */
+  review_url?: string;
+}
+
+export interface ConstantsFreshness {
+  key: string;
+  last_updated: string;
+  update_cycle: string;
+  review_url: string;
+  stale: boolean;
 }
 
 export interface PlanResult {

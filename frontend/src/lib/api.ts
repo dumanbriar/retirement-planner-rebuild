@@ -1,4 +1,4 @@
-import type { PlanInput, PlanResult } from "./types";
+import type { ConstantsFreshness, PlanInput, PlanResult } from "./types";
 
 const BASE_URL: string = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -64,6 +64,18 @@ async function post(path: string, input: PlanInput): Promise<Response> {
 export async function calculatePlan(input: PlanInput): Promise<PlanResult> {
   const res = await post("/api/plan", input);
   return (await res.json()) as PlanResult;
+}
+
+/** Per-constant freshness: last verified date, update cycle, and staleness flag. */
+export async function getConstantsFreshness(): Promise<ConstantsFreshness[]> {
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}/api/constants/freshness`);
+  } catch {
+    return [];  // non-fatal: freshness is advisory only
+  }
+  if (!res.ok) return [];
+  return (await res.json()) as ConstantsFreshness[];
 }
 
 /** Download the audit workbook; every on-screen number is reproducible from it. */

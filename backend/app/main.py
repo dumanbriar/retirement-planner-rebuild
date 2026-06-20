@@ -46,6 +46,14 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/api/constants/freshness")
+def get_constants_freshness() -> list[dict]:
+    """Per-group freshness: last_updated date, update cycle, and whether the
+    value is likely due for review based on calendar logic."""
+    from .engine.constants import constants_freshness
+    return constants_freshness()
+
+
 @app.post("/api/plan", response_model=PlanResult)
 @limiter.limit("10/minute")
 def plan(request: Request, inp: PlanInput) -> PlanResult:
