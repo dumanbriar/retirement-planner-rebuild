@@ -342,9 +342,15 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
                    "retirement; wage tax is assumed paid from wages and does not "
                    "draw down the portfolio. Dividend/cash-interest drag still "
                    "applies separately. Wages grow at the inflation assumption."},
-        {"label": "Pre-retirement tax treatment", "value": f"{fpct(a.pre_retirement_tax_rate)} flat",
-         "kind": "assumed", "source": "Wages are not modeled. Dividend drag at 15%; cash "
-                   "interest and pre-retirement RMD/SS inflows taxed at this flat rate."},
+        {"label": "Pre-retirement tax treatment",
+         "value": f"{fpct(a.pre_retirement_tax_rate)} flat drag",
+         "kind": "assumed",
+         "source": "The flat pre-retirement rate applies to the annual cash-"
+                   "interest drag and (when no salary is entered) to pre-retirement "
+                   "RMD/SS inflows; the dividend drag is a separate 15%. When a "
+                   "salary is entered, working-year income tax and those inflows are "
+                   "modeled with the full tax engine instead — see 'Pre-retirement "
+                   "income tax (with salary)'."},
         {"label": "Heir tax rate (terminal valuation)", "value": fpct(a.heir_tax_rate),
          "kind": "assumed", "source": "Discount on inherited tax-deferred/HSA dollars; "
                    "taxable assets assume basis step-up (IRC sec. 1014)."},
