@@ -83,7 +83,9 @@ export function IncomeSpendingChart({
           hsa_wd: (wd.hsa ?? 0) * d,
           cash_wd: (wd.cash ?? 0) * d,
           other: y.other_income * d,
-          need: (y.spend_goal + y.healthcare_cost + y.debt_payments + y.total_tax) * d,
+          need:
+            (y.spend_goal + y.healthcare_cost + y.debt_payments + y.home_purchase + y.total_tax) *
+            d,
           shortfall: y.shortfall * d,
         };
       });
@@ -99,7 +101,8 @@ export function IncomeSpendingChart({
           Retirement years only. Bars stack each year's funding sources: gross Social Security,
           RMDs, additional withdrawals by account type, and other income (Roth conversions are
           excluded — they move money between accounts rather than fund spending). The navy line is
-          total spending need: lifestyle goal + healthcare + debt payments + taxes. Bars can exceed
+          total spending need: lifestyle goal + healthcare + debt payments + any home-purchase down
+          payment + taxes. Bars can exceed
           the line when forced income (e.g. RMDs) outruns need — the surplus is reinvested in the
           taxable account.
         </>

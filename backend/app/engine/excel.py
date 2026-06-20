@@ -127,9 +127,12 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
             + (f"; basis {acc.cost_basis:,.0f}" if acc.cost_basis is not None else ""),
             "assumed", "User input"))
     for l in plan.liabilities:
+        future = (f"; starts age {l.start_age}, down payment {l.down_payment:,.0f}"
+                  if l.start_age is not None else "")
         user_inputs.append((f"Liability: {l.name}",
                             f"balance {l.balance:,.0f}; rate {l.interest_rate*100:.2f}%; "
-                            f"payment {l.annual_payment:,.0f}/yr", "assumed", "User input"))
+                            f"payment {l.annual_payment:,.0f}/yr{future}",
+                            "assumed", "User input"))
     for s in plan.income_streams:
         user_inputs.append((f"Income: {s.name} ({persons[s.owner].name})",
                             f"{s.annual_amount:,.0f}/yr ages {s.start_age}-{s.end_age or 'death'}"
@@ -157,8 +160,8 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
     age_cols = [f"{p.name} age" for p in persons]
     headers = ["Year"] + age_cols + ["Contributions", "Growth (net of drag)",
                "Tax drag / pre-ret. tax", "Forced RMD", "SS reinvested (gross)",
-               "Other income", "Total assets", "Liabilities", "Net worth",
-               "Net worth (today's $)", "Notes"]
+               "Other income", "Home purchase", "Total assets", "Liabilities",
+               "Net worth", "Net worth (today's $)", "Notes"]
     _sheet_header(ws, 3, headers)
     r = 4
     for y in result.years:
@@ -169,8 +172,8 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
         vals = [y.year] + [y.ages[i] if i < len(y.ages) else None
                            for i in range(len(persons))] + \
             [contrib, growth, y.total_tax, y.rmd_total, y.ss_total, y.other_income,
-             y.total_assets, y.total_liabilities, y.net_worth, y.net_worth_real,
-             "; ".join(y.flags)]
+             y.home_purchase, y.total_assets, y.total_liabilities, y.net_worth,
+             y.net_worth_real, "; ".join(y.flags)]
         for c, v in enumerate(vals, 1):
             cell = ws.cell(row=r, column=c, value=v)
             if c > 1 + len(persons) and isinstance(v, float):
@@ -183,7 +186,7 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
     ws["A1"] = "Retirement Phase — full cash-flow and tax detail"
     ws["A1"].font = TITLE_FONT
     headers = (["Year"] + age_cols +
-               ["Filing", "Spend goal", "Debt pmts", "Healthcare (net)",
+               ["Filing", "Spend goal", "Debt pmts", "Home purchase", "Healthcare (net)",
                 "ACA subsidy", "IRMAA", "SS gross", "Taxable SS", "Other income",
                 "RMD", "W/D cash", "W/D taxable", "W/D tax-def", "W/D Roth",
                 "W/D HSA", "Roth conversion", "Realized gains", "Dividends",
@@ -201,7 +204,8 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
         hsa_wd = sum(ac.withdrawal for ac in y.accounts if ac.type.value == "hsa")
         vals = ([y.year] + [y.ages[i] if i < len(y.ages) else None
                             for i in range(len(persons))] +
-                [y.filing_status, y.spend_goal, y.debt_payments, y.healthcare_cost,
+                [y.filing_status, y.spend_goal, y.debt_payments, y.home_purchase,
+                 y.healthcare_cost,
                  y.aca_subsidy, y.irmaa_surcharge, y.ss_total, y.taxable_ss,
                  y.other_income, y.rmd_total, wbt.get("cash", 0.0),
                  wbt.get("taxable", 0.0), wbt.get("tax_deferred", 0.0),

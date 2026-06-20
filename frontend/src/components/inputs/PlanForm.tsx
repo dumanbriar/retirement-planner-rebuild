@@ -59,7 +59,7 @@ export function PlanForm({
           </Card>
           <Card
             title="Liabilities"
-            help="Outstanding debts. Annual payments continue (with interest accruing) until each balance is paid off, and count toward spending need."
+            help="Outstanding debts. Annual payments continue (with interest accruing) until each balance is paid off, and count toward spending need. Set a start age to model a future mortgage / home purchase (the down payment is drawn from the portfolio then; the home isn't tracked as an asset)."
           >
             <LiabilitiesSection {...sectionProps} />
           </Card>

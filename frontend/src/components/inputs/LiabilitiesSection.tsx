@@ -1,7 +1,7 @@
 import { Plus, Trash2 } from "lucide-react";
 import type { Liability } from "../../lib/types";
 import { newLiability } from "../../lib/sample";
-import { NumberField, PercentField, TextField } from "../ui/fields";
+import { NumberField, OptionalNumberField, PercentField, TextField } from "../ui/fields";
 import { removeAt, type SectionProps, updateAt } from "./sectionProps";
 
 export function LiabilitiesSection({ input, onChange, errors, dense }: SectionProps) {
@@ -17,7 +17,7 @@ export function LiabilitiesSection({ input, onChange, errors, dense }: SectionPr
         const e = (f: string) => errors[`liabilities.${i}.${f}`];
         return (
           <div key={i} className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
-            <div className={`grid gap-3 ${dense ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-4"}`}>
+            <div className={`grid gap-3 ${dense ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3"}`}>
               <TextField
                 label="Name"
                 value={l.name}
@@ -32,6 +32,11 @@ export function LiabilitiesSection({ input, onChange, errors, dense }: SectionPr
                 min={0}
                 prefix="$"
                 error={e("balance")}
+                help={
+                  l.start_age != null
+                    ? "Mortgage amount at purchase, in today's dollars (grown to the purchase year at the inflation assumption)."
+                    : undefined
+                }
               />
               <PercentField
                 label="Interest rate"
@@ -50,6 +55,27 @@ export function LiabilitiesSection({ input, onChange, errors, dense }: SectionPr
                 error={e("annual_payment")}
                 help="Fixed annual payment until the balance reaches zero. Payments are part of spending need in retirement, on top of the lifestyle spending goal."
               />
+              <OptionalNumberField
+                label="Start age"
+                value={l.start_age ?? null}
+                onChange={(start_age) => set(i, { start_age })}
+                min={18}
+                max={100}
+                placeholder="now"
+                error={e("start_age")}
+                help="For a future purchase (e.g. a mortgage on a home bought later): the primary person's age when the debt begins. Leave blank for a debt you already have. The home itself is not tracked as an asset, so net worth dips at purchase."
+              />
+              {l.start_age != null && (
+                <NumberField
+                  label="Down payment"
+                  value={l.down_payment ?? 0}
+                  onChange={(down_payment) => set(i, { down_payment })}
+                  min={0}
+                  prefix="$"
+                  error={e("down_payment")}
+                  help="One-time cash at purchase (down payment + closing), in today's dollars. Drawn from the portfolio in the purchase year."
+                />
+              )}
             </div>
             <div className="mt-2 flex justify-end">
               <button

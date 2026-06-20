@@ -66,6 +66,12 @@ class Liability(BaseModel):
     balance: float = Field(ge=0)
     interest_rate: float = Field(default=0.0, ge=0, le=0.30)
     annual_payment: float = Field(default=0, ge=0)
+    # Future-dated debt (e.g. a home purchase). When set, the primary person's
+    # age at which the mortgage begins; the balance and down_payment (today's
+    # dollars) are grown to that year and the down payment is drawn from the
+    # portfolio. None => already active today (current behavior).
+    start_age: Optional[int] = Field(default=None, ge=18, le=100)
+    down_payment: float = Field(default=0, ge=0)  # one-time cash at purchase, today's $
 
 
 class IncomeStream(BaseModel):
@@ -163,6 +169,7 @@ class YearRow(BaseModel):
     # cash flows (nominal $)
     spend_goal: float = 0               # inflated lifestyle spending
     debt_payments: float = 0
+    home_purchase: float = 0            # one-time down payment / purchase outflow
     healthcare_cost: float = 0          # net premiums + OOP, incl. IRMAA
     aca_subsidy: float = 0
     irmaa_surcharge: float = 0

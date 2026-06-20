@@ -15,7 +15,7 @@ from app.engine.taxes import (TaxYearInput, aca_applicable_pct, aca_subsidy,
                               compute_taxes, irmaa_tier,
                               taxable_social_security)
 from app.models import (Account, AccountType, Assumptions, ConversionStrategy,
-                        Person, PlanInput)
+                        Liability, Person, PlanInput)
 
 
 # ----------------------------------------------------------- federal tax
@@ -344,3 +344,80 @@ def test_accounts_max_length():
             accounts=accts,
             annual_spending=50_000,
         )
+
+
+# ----------------------------------------------- future-dated liabilities
+def _future_buyer(**kw) -> PlanInput:
+    """A single 55-yo with ample liquidity to fund a future home purchase."""
+    defaults = dict(
+        persons=[Person(name="Pat", current_age=55, retirement_age=65, death_age=90,
+                        ss_monthly_at_fra=2500, ss_claim_age=67)],
+        accounts=[
+            Account(name="401(k)", type=AccountType.tax_deferred, owner=0,
+                    balance=600_000, annual_contribution=0, expected_return=0.05),
+            Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                    balance=500_000, cost_basis=500_000, annual_contribution=0,
+                    expected_return=0.05),
+            Account(name="Cash", type=AccountType.cash, owner=0, balance=200_000,
+                    annual_contribution=0, expected_return=0.04),
+        ],
+        annual_spending=60_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none,
+                                inflation=0.025),
+    )
+    defaults.update(kw)
+    return PlanInput(**defaults)
+
+
+def test_future_mortgage_dormant_then_activates():
+    # Pat (55) buys at 70 (year 2041): $300k mortgage, no down payment.
+    plan = _future_buyer(liabilities=[Liability(
+        name="Future home", balance=300_000, interest_rate=0.05,
+        annual_payment=24_000, start_age=70, down_payment=0)])
+    sim = Simulator(plan, strategy=ConversionStrategy.none)
+    rows, _ = sim.run()
+    by_year = {y.year: y for y in rows}
+    # dormant before purchase: contributes nothing to liabilities
+    assert by_year[2040].total_liabilities == 0
+    # active from the purchase year, grown to nominal dollars (>300k)
+    scale = (1 + plan.assumptions.inflation) ** (2041 - C.BASE_YEAR)
+    assert by_year[2041].total_liabilities > 300_000 * scale * 0.9
+    # and it amortizes down thereafter
+    assert by_year[2045].total_liabilities < by_year[2041].total_liabilities
+
+
+def test_down_payment_withdrawn_from_portfolio():
+    # Identical plans; one adds a $150k (today's $) down payment at age 70.
+    base = _future_buyer()
+    with_dp = _future_buyer(liabilities=[Liability(
+        name="Future home", balance=0, interest_rate=0.0,
+        annual_payment=0, start_age=70, down_payment=150_000)])
+    m_base = Simulator(base, strategy=ConversionStrategy.none).run()[1]
+    m_dp = Simulator(with_dp, strategy=ConversionStrategy.none).run()[1]
+    # the down payment leaves the portfolio: ending real wealth is lower by
+    # at least the today's-dollar down payment (it lost future growth too)
+    assert (m_base.ending_net_worth_real - m_dp.ending_net_worth_real) >= 150_000 * 0.95
+
+
+def test_purchase_year_records_home_purchase_outflow():
+    plan = _future_buyer(liabilities=[Liability(
+        name="Future home", balance=200_000, interest_rate=0.05,
+        annual_payment=18_000, start_age=70, down_payment=100_000)])
+    rows = Simulator(plan, strategy=ConversionStrategy.none).run()[0]
+    by_year = {y.year: y for y in rows}
+    scale = (1 + plan.assumptions.inflation) ** (2041 - C.BASE_YEAR)
+    # the one-time outflow is the inflated down payment, only in the buy year
+    assert math.isclose(by_year[2041].home_purchase, 100_000 * scale, rel_tol=1e-6)
+    assert by_year[2040].home_purchase == 0
+    assert by_year[2042].home_purchase == 0
+
+
+def test_existing_liability_backward_compatible():
+    # start_age=None must behave exactly like the pre-feature liability.
+    liab = dict(name="Mortgage", balance=200_000, interest_rate=0.04,
+                annual_payment=15_000)
+    plan = _future_buyer(liabilities=[Liability(**liab)])
+    rows = Simulator(plan, strategy=ConversionStrategy.none).run()[0]
+    # active from year 1, no down-payment event ever
+    assert rows[0].total_liabilities > 0
+    assert all(y.home_purchase == 0 for y in rows)

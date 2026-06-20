@@ -58,6 +58,7 @@ export function YearTable({
       { label: "Spending", help: "Lifestyle spending goal for the year (the inflated annual spending input). Excludes healthcare, debt, and taxes, shown separately.", ...money((y) => y.spend_goal) },
       { label: "Healthcare", help: "Net healthcare cost: ACA premiums minus subsidies before 65; Medicare Part B (incl. IRMAA) plus other premiums/OOP after 65.", ...money((y) => y.healthcare_cost) },
       { label: "Debt pay", help: "Liability payments made this year.", ...money((y) => y.debt_payments) },
+      { label: "Home buy", help: "One-time down payment / purchase cash drawn from the portfolio when a future mortgage starts. The home itself is not tracked as an asset.", ...money((y) => y.home_purchase) },
       { label: "Soc. Sec.", help: "Gross household Social Security benefits received.", ...money((y) => y.ss_total) },
       { label: "Other inc.", help: "Pensions, annuities, rentals, part-time work.", ...money((y) => y.other_income) },
       { label: "RMD", help: "Required minimum distributions (start at 73 or 75 by birth year; IRS Uniform Lifetime Table). Included in the tax-deferred withdrawal column.", ...money((y) => y.rmd_total) },

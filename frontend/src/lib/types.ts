@@ -61,6 +61,10 @@ export interface Liability {
   balance: number;
   interest_rate: number; // 0..0.30
   annual_payment: number;
+  /** Primary person's age when a future mortgage/home purchase begins; null => already active. */
+  start_age?: number | null;
+  /** One-time cash at purchase (down payment + closing), today's dollars. */
+  down_payment?: number;
 }
 
 /** Pension, annuity, rental, part-time work in retirement, etc. */
@@ -152,6 +156,7 @@ export interface YearRow {
   // cash flows (nominal $)
   spend_goal: number;
   debt_payments: number;
+  home_purchase: number; // one-time down payment / purchase outflow
   healthcare_cost: number; // net premiums + OOP, incl. IRMAA
   aca_subsidy: number;
   irmaa_surcharge: number;

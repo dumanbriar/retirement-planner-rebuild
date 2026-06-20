@@ -200,6 +200,16 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
          "source": "IRC sec. 1411. Thresholds NOT indexed, by statute. Net investment "
                    "income includes qualified dividends, realized capital gains, and cash "
                    "interest (all investment income under §1411(c))."},
+        {"label": "Future home purchase", "value": "mortgage + down payment at start age",
+         "kind": "estimated",
+         "source": "A liability with a start age models a future purchase: the mortgage "
+                   "and a one-time down payment begin that year. Amounts entered in "
+                   "today's dollars are grown to the purchase year at the inflation "
+                   "assumption. The home itself is NOT modeled as an asset, so net worth "
+                   "reflects only the new debt and the cash spent — it understates reality "
+                   "by roughly the property's value. Pre-retirement mortgage payments are "
+                   "assumed covered by (unmodeled) wages, as with existing debts; the down "
+                   "payment is always drawn from the portfolio."},
         {"label": "Withdrawal order", "value": "cash > taxable > tax-deferred > Roth > HSA",
          "kind": "modeled", "source": "Conventional tax-efficient sequencing; HSA reserved "
                    "for qualified medical first (tax-free per IRC sec. 223)."},

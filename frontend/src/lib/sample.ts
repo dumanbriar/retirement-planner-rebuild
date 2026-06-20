@@ -126,7 +126,14 @@ export function newAccount(): Account {
 }
 
 export function newLiability(): Liability {
-  return { name: "New liability", balance: 0, interest_rate: 0.05, annual_payment: 0 };
+  return {
+    name: "New liability",
+    balance: 0,
+    interest_rate: 0.05,
+    annual_payment: 0,
+    start_age: null,
+    down_payment: 0,
+  };
 }
 
 export function newIncomeStream(): IncomeStream {

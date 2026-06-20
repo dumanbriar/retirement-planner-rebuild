@@ -44,6 +44,10 @@ export function validatePlanInput(input: PlanInput): FieldErrors {
     if (!(l.balance >= 0)) errors[k("balance")] = "Balance must be ≥ 0.";
     if (!inRange(l.interest_rate, 0, 0.3)) errors[k("interest_rate")] = "Rate must be 0–30%.";
     if (!(l.annual_payment >= 0)) errors[k("annual_payment")] = "Must be ≥ 0.";
+    if (l.start_age != null && !inRange(l.start_age, 18, 100))
+      errors[k("start_age")] = "Start age must be 18–100.";
+    if (l.down_payment != null && !(l.down_payment >= 0))
+      errors[k("down_payment")] = "Must be ≥ 0.";
   });
 
   input.income_streams.forEach((s, i) => {

@@ -107,7 +107,9 @@ class Simulator:
                 owner=0, balance=0, cost_basis=0)))
 
         self.liabilities = [{"name": l.name, "balance": l.balance,
-                             "rate": l.interest_rate, "payment": l.annual_payment}
+                             "rate": l.interest_rate, "payment": l.annual_payment,
+                             "start_age": l.start_age, "down_payment": l.down_payment,
+                             "activated": False}
                             for l in plan.liabilities]
         self.magi_history: dict[int, float] = {}
         self.ss_level: list[float] = [0.0] * len(self.persons)   # today's-$ annual
@@ -133,6 +135,32 @@ class Simulator:
 
     def alive(self, i: int, year: int) -> bool:
         return self.age(i, year) <= self.persons[i].death_age
+
+    def _liab_active(self, l: dict, year: int) -> bool:
+        """A future-dated liability (a home purchase) is dormant until the
+        primary person reaches its start age; None => active from year 1."""
+        return l["start_age"] is None or self.age(0, year) >= l["start_age"]
+
+    def _is_future_purchase(self, l: dict) -> bool:
+        """True only for a genuinely future purchase (start age beyond the
+        primary's age today), which carries a down payment and inflation
+        scaling. A start age at/below today's age is a pre-existing debt."""
+        return l["start_age"] is not None and l["start_age"] > self.age(0, self.base_year)
+
+    def activate_liabilities(self, year: int) -> float:
+        """Activate any liabilities whose purchase year is `year`. For genuine
+        future purchases, grow the balance and down payment to nominal dollars
+        at the purchase year. Returns the total down-payment outflow due now."""
+        due = 0.0
+        for l in self.liabilities:
+            if l["activated"] or not self._liab_active(l, year):
+                continue
+            l["activated"] = True
+            if self._is_future_purchase(l):
+                scale = self.infl(year)
+                l["balance"] *= scale
+                due += l["down_payment"] * scale
+        return due
 
     def filing_status(self, year: int) -> str:
         n_alive = sum(self.alive(i, year) for i in range(len(self.persons)))
@@ -322,11 +350,15 @@ class Simulator:
             self.update_ss_levels(year)
             dividends, interest = self.start_of_year_income()
 
+            # a future home purchase activates here: the mortgage appears and a
+            # one-time down payment must be funded from the portfolio this year
+            home_purchase = self.activate_liabilities(year)
+
             if retired:
                 row, prev_tax = self.retirement_year_step(
-                    year, status, dividends, interest, prev_tax)
+                    year, status, dividends, interest, prev_tax, home_purchase)
             else:
-                row = self.accumulation_year_step(year, status)
+                row = self.accumulation_year_step(year, status, home_purchase)
 
             row.dividends = dividends
             row.interest = interest
@@ -353,10 +385,10 @@ class Simulator:
                     acct.balance -= acct.drag
                     row.total_tax += acct.drag
 
-            # liabilities amortize every year
+            # active liabilities amortize every year (dormant future debts skip)
             debt_paid = 0.0
             for l in self.liabilities:
-                if l["balance"] <= 0:
+                if l["balance"] <= 0 or not self._liab_active(l, year):
                     continue
                 accrued = l["balance"] * (1 + l["rate"])
                 pay = min(l["payment"], accrued)
@@ -374,7 +406,8 @@ class Simulator:
                 cost_basis=x.basis if x.spec.type == AccountType.taxable else None,
             ) for x in self.accounts]
             row.total_assets = sum(x.balance for x in self.accounts)
-            row.total_liabilities = sum(l["balance"] for l in self.liabilities)
+            row.total_liabilities = sum(l["balance"] for l in self.liabilities
+                                        if self._liab_active(l, year))
             row.net_worth = row.total_assets - row.total_liabilities
             row.net_worth_real = row.net_worth / self.infl(year)
             self.magi_history[year] = row.magi if retired \
@@ -420,7 +453,8 @@ class Simulator:
         return rows, metrics
 
     # -------------------------------------------------------- accumulation yr
-    def accumulation_year_step(self, year: int, status: str) -> YearRow:
+    def accumulation_year_step(self, year: int, status: str,
+                               home_purchase: float = 0.0) -> YearRow:
         row = YearRow(year=year, phase="accumulation", filing_status=status,
                       ages=[self.age(i, year) if self.alive(i, year) else None
                             for i in range(len(self.persons))], accounts=[])
@@ -466,12 +500,28 @@ class Simulator:
         row.other_income = other_taxable + other_nontaxable
         row.rmd_total = rmd_total
         row.rmd_by_person = rmds
+
+        # a home purchase this year: fund the down payment from the portfolio
+        # (cash -> taxable -> ... via the waterfall). Penalties for raiding
+        # tax-advantaged accounts are folded into tax so they aren't free.
+        if home_purchase > 0:
+            got = self.waterfall_withdraw(home_purchase, scratch, year)
+            row.home_purchase = home_purchase
+            row.total_tax += scratch.penalties
+            if scratch.flags:
+                row.flags = list(row.flags) + scratch.flags
+            if got + 1 < home_purchase:
+                row.shortfall = home_purchase - got
+                row.flags = list(row.flags) + [
+                    "Portfolio could not fully fund the home down payment"]
+
         row.withdrawals_by_type = scratch.withdrawals_by_type
         return row
 
     # ---------------------------------------------------------- retirement yr
     def retirement_year_step(self, year: int, status: str, dividends: float,
-                             interest: float, prev_tax: float) -> tuple[YearRow, float]:
+                             interest: float, prev_tax: float,
+                             home_purchase: float = 0.0) -> tuple[YearRow, float]:
         a = self.a
         scale = self.infl(year)
         ages = [self.age(i, year) if self.alive(i, year) else None
@@ -508,7 +558,8 @@ class Simulator:
         hsa_eligible_costs = hsa_eligible_medicare + pre65_oop
 
         debt_payments = sum(min(l["payment"], l["balance"] * (1 + l["rate"]))
-                            for l in self.liabilities if l["balance"] > 0)
+                            for l in self.liabilities
+                            if l["balance"] > 0 and self._liab_active(l, year))
 
         snapshot = [(x.balance, x.basis) for x in self.accounts]
         tax_guess, subsidy_guess = prev_tax, 0.0
@@ -575,7 +626,7 @@ class Simulator:
                 scratch.roth_conversion = converted
 
             # 4) cover remaining need from the waterfall
-            need = spend_goal + debt_payments + healthcare_net + tax_guess
+            need = spend_goal + debt_payments + home_purchase + healthcare_net + tax_guess
             resources = ss_total + other_taxable + other_nontaxable + rmd_total
             gap = need + scratch.penalties - resources
             if gap > 0:
@@ -611,7 +662,8 @@ class Simulator:
             scratch.flags.append("tax/ACA fixed point did not fully converge; last iterate used")
 
         # 6) any surplus income is reinvested
-        need = spend_goal + debt_payments + healthcare_net + tax_guess + scratch.penalties
+        need = (spend_goal + debt_payments + home_purchase + healthcare_net
+                + tax_guess + scratch.penalties)
         resources = (ss_total + other_taxable + other_nontaxable + rmd_total
                      + sum(scratch.withdrawals_by_type.values()))
         surplus = max(0.0, resources - need - scratch.shortfall)
@@ -627,6 +679,7 @@ class Simulator:
         row = YearRow(
             year=year, phase="retirement", filing_status=status, ages=ages, accounts=[],
             spend_goal=spend_goal, debt_payments=debt_payments,
+            home_purchase=home_purchase,
             healthcare_cost=healthcare_net, aca_subsidy=subsidy_guess,
             irmaa_surcharge=irmaa_total,
             ss_benefit=benefits, ss_total=ss_total,
