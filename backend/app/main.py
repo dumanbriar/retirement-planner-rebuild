@@ -3,9 +3,13 @@
 POST /api/plan        -> full PlanResult JSON
 POST /api/plan/excel  -> auditable .xlsx workbook (same inputs)
 GET  /health          -> liveness probe
-"""
-from __future__ import annotations
 
+NOTE: do NOT add `from __future__ import annotations` here. Under PEP 563 the
+endpoint annotations become strings, and combined with the slowapi rate-limit
+decorator FastAPI fails to resolve `inp: PlanInput` as the request body and
+treats it as a (missing) query parameter, returning 422 on every call. The
+HTTP-layer test in tests/test_api.py guards against this regression.
+"""
 import io
 
 from fastapi import FastAPI, Request
