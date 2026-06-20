@@ -34,7 +34,7 @@ export function LiabilitiesSection({ input, onChange, errors, dense }: SectionPr
                 error={e("balance")}
                 help={
                   l.start_age != null
-                    ? "Mortgage amount at purchase, in today's dollars (grown to the purchase year at the inflation assumption)."
+                    ? "Loan amount at purchase, in actual (future) dollars at the purchase date — enter the literal mortgage you expect to take, not today's dollars."
                     : undefined
                 }
               />
@@ -73,7 +73,7 @@ export function LiabilitiesSection({ input, onChange, errors, dense }: SectionPr
                   min={0}
                   prefix="$"
                   error={e("down_payment")}
-                  help="One-time cash at purchase (down payment + closing), in today's dollars. Drawn from the portfolio in the purchase year."
+                  help="One-time cash at purchase (down payment + closing), in actual (future) dollars at the purchase date. Drawn from the portfolio in the purchase year."
                 />
               )}
             </div>

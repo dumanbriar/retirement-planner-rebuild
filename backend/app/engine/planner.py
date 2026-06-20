@@ -203,9 +203,10 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
         {"label": "Future home purchase", "value": "mortgage + down payment at start age",
          "kind": "estimated",
          "source": "A liability with a start age models a future purchase: the mortgage "
-                   "and a one-time down payment begin that year. Amounts entered in "
-                   "today's dollars are grown to the purchase year at the inflation "
-                   "assumption. The home itself is NOT modeled as an asset, so net worth "
+                   "and a one-time down payment begin that year. Amounts are entered as "
+                   "the literal (nominal) dollar values at the purchase date — the actual "
+                   "loan and down payment expected — not today's dollars. The home itself "
+                   "is NOT modeled as an asset, so net worth "
                    "reflects only the new debt and the cash spent — it understates reality "
                    "by roughly the property's value. Pre-retirement mortgage payments are "
                    "assumed covered by (unmodeled) wages, as with existing debts; the down "

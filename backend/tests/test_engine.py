@@ -379,9 +379,9 @@ def test_future_mortgage_dormant_then_activates():
     by_year = {y.year: y for y in rows}
     # dormant before purchase: contributes nothing to liabilities
     assert by_year[2040].total_liabilities == 0
-    # active from the purchase year, grown to nominal dollars (>300k)
-    scale = (1 + plan.assumptions.inflation) ** (2041 - C.BASE_YEAR)
-    assert by_year[2041].total_liabilities > 300_000 * scale * 0.9
+    # active from the purchase year at the literal $300k, amortized one year:
+    # 300_000 * 1.05 - 24_000 = 291_000
+    assert math.isclose(by_year[2041].total_liabilities, 291_000, abs_tol=1)
     # and it amortizes down thereafter
     assert by_year[2045].total_liabilities < by_year[2041].total_liabilities
 
@@ -394,9 +394,9 @@ def test_down_payment_withdrawn_from_portfolio():
         annual_payment=0, start_age=70, down_payment=150_000)])
     m_base = Simulator(base, strategy=ConversionStrategy.none).run()[1]
     m_dp = Simulator(with_dp, strategy=ConversionStrategy.none).run()[1]
-    # the down payment leaves the portfolio: ending real wealth is lower by
-    # at least the today's-dollar down payment (it lost future growth too)
-    assert (m_base.ending_net_worth_real - m_dp.ending_net_worth_real) >= 150_000 * 0.95
+    # the down payment leaves the portfolio: a $150k nominal 2041 outflow is
+    # worth less in today's dollars, but the real-wealth gap is still sizeable
+    assert (m_base.ending_net_worth_real - m_dp.ending_net_worth_real) > 100_000
 
 
 def test_purchase_year_records_home_purchase_outflow():
@@ -405,9 +405,8 @@ def test_purchase_year_records_home_purchase_outflow():
         annual_payment=18_000, start_age=70, down_payment=100_000)])
     rows = Simulator(plan, strategy=ConversionStrategy.none).run()[0]
     by_year = {y.year: y for y in rows}
-    scale = (1 + plan.assumptions.inflation) ** (2041 - C.BASE_YEAR)
-    # the one-time outflow is the inflated down payment, only in the buy year
-    assert math.isclose(by_year[2041].home_purchase, 100_000 * scale, rel_tol=1e-6)
+    # the one-time outflow is the literal down payment, only in the buy year
+    assert math.isclose(by_year[2041].home_purchase, 100_000, abs_tol=0.01)
     assert by_year[2040].home_purchase == 0
     assert by_year[2042].home_purchase == 0
 

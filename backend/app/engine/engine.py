@@ -143,23 +143,21 @@ class Simulator:
 
     def _is_future_purchase(self, l: dict) -> bool:
         """True only for a genuinely future purchase (start age beyond the
-        primary's age today), which carries a down payment and inflation
-        scaling. A start age at/below today's age is a pre-existing debt."""
+        primary's age today), which carries a down payment. A start age
+        at/below today's age is a pre-existing debt."""
         return l["start_age"] is not None and l["start_age"] > self.age(0, self.base_year)
 
     def activate_liabilities(self, year: int) -> float:
-        """Activate any liabilities whose purchase year is `year`. For genuine
-        future purchases, grow the balance and down payment to nominal dollars
-        at the purchase year. Returns the total down-payment outflow due now."""
+        """Activate any liabilities whose purchase year is `year`. Future-purchase
+        amounts are entered as literal (nominal) purchase-date dollars, so no
+        scaling is applied. Returns the down-payment outflow due now."""
         due = 0.0
         for l in self.liabilities:
             if l["activated"] or not self._liab_active(l, year):
                 continue
             l["activated"] = True
             if self._is_future_purchase(l):
-                scale = self.infl(year)
-                l["balance"] *= scale
-                due += l["down_payment"] * scale
+                due += l["down_payment"]
         return due
 
     def filing_status(self, year: int) -> str:
