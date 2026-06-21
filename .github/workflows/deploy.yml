@@ -2,7 +2,7 @@ name: Test & Deploy
 
 on:
   push:
-    branches: [main, "claude/laughing-pasteur-8uq412"]
+    branches: [main, "claude/laughing-pasteur-8uq412", "claude/ecstatic-hypatia-msb2t4"]
   workflow_dispatch:
 
 concurrency:
