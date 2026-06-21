@@ -549,7 +549,7 @@ def test_employer_vehicle_uses_elective_not_ira_limit():
         vehicle=AccountVehicle.ira, balance=100_000,
         annual_contribution=20_000, expected_return=0.06)))
     assert not any("exceed" in w for w in emp.warnings)
-    assert any("IRA limit" in w for w in ira.warnings)
+    assert any("IRA contribution limit" in w for w in ira.warnings)
 
 
 def test_backdoor_roth_flagged_for_high_earner():
@@ -577,3 +577,41 @@ def test_apply_split_preserves_vehicle_totals():
         assert math.isclose(sum(a.annual_contribution for a in emp), 20_000, abs_tol=1)
         roth = sum(a.annual_contribution for a in emp if a.type == AccountType.roth)
         assert math.isclose(roth, 20_000 * pct, abs_tol=1)
+
+
+def test_limit_warning_not_duplicated_per_year():
+    # Regression: the message embedded {year}, so one over-limit input spammed a
+    # separate warning for every accumulation year. It must appear exactly once.
+    plan = _one_account_plan(Account(
+        name="Overfunded 401k", type=AccountType.tax_deferred, owner=0,
+        vehicle=AccountVehicle.employer, balance=100_000,
+        annual_contribution=40_000, expected_return=0.06))
+    r = build_plan(plan)
+    elective = [w for w in r.warnings if "elective-deferral" in w]
+    assert len(elective) == 1
+
+
+def test_untagged_roth_defaults_to_ira_not_employer():
+    # Regression: an untagged Roth account (vehicle=None) was treated as an
+    # employer Roth 401(k) and lumped into the 401(k) elective-deferral bucket
+    # with a real 401(k), producing a false over-limit warning. It must default
+    # to a Roth IRA instead.
+    plan = PlanInput(
+        persons=[Person(name="Briar", current_age=40, retirement_age=65,
+                        death_age=90, salary=120_000)],
+        accounts=[
+            Account(name="401k", type=AccountType.tax_deferred, owner=0,
+                    vehicle=AccountVehicle.employer, balance=200_000,
+                    annual_contribution=20_000),
+            Account(name="Roth IRA", type=AccountType.roth, owner=0,  # vehicle=None
+                    balance=50_000, annual_contribution=7_000),
+            Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                    balance=10_000, cost_basis=10_000),
+        ],
+        annual_spending=60_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none))
+    r = build_plan(plan)
+    # 20k employer + 7k IRA, correctly bucketed, are each under their own cap.
+    assert not any("elective-deferral" in w for w in r.warnings)
+    assert Account(name="x", type=AccountType.roth, owner=0, balance=0)\
+        .limit_vehicle() == AccountVehicle.ira

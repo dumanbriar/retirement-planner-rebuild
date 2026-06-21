@@ -619,11 +619,12 @@ class Simulator:
                         roth_ira += acct.contribution
             if emp > C.elective_deferral_limit(age) * scale + 1:
                 new_flags.append(
-                    f"{p.name}: employer-plan contributions exceed the {year} "
-                    "elective-deferral limit (401(k)/403(b)).")
+                    f"{p.name}: employer-plan (401(k)/403(b)) contributions exceed "
+                    "the IRS elective-deferral limit — check each account's Vehicle "
+                    "setting (IRAs should be set to 'IRA').")
             if ira > C.ira_contribution_limit(age) * scale + 1:
                 new_flags.append(
-                    f"{p.name}: IRA contributions exceed the {year} IRA limit.")
+                    f"{p.name}: IRA contributions exceed the IRS IRA contribution limit.")
             if roth_ira > 0 and magi > roth_phaseout_end:
                 new_flags.append(
                     f"{p.name}: Roth IRA contribution requires a backdoor Roth "

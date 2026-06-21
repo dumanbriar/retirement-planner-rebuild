@@ -78,8 +78,13 @@ class Account(BaseModel):
         return self.expected_return if self.expected_return is not None else DEFAULT_RETURNS[self.type]
 
     def limit_vehicle(self) -> AccountVehicle:
-        """Vehicle for limit purposes; defaults to employer when unspecified."""
-        return self.vehicle if self.vehicle is not None else AccountVehicle.employer
+        """Vehicle for contribution-limit purposes. When unspecified, default by
+        type: a Roth account is most likely a Roth IRA, while a tax-deferred
+        account is most likely an employer 401(k)/403(b). This avoids lumping an
+        untagged Roth IRA into the (much larger) elective-deferral bucket."""
+        if self.vehicle is not None:
+            return self.vehicle
+        return AccountVehicle.ira if self.type == AccountType.roth else AccountVehicle.employer
 
 
 class Liability(BaseModel):

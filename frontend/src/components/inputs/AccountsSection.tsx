@@ -28,11 +28,15 @@ export function AccountsSection({ input, onChange, errors, dense }: SectionProps
     onChange({ ...input, accounts: updateAt(input.accounts, i, patch) });
 
   const setType = (i: number, type: AccountType) => {
-    // Prefill the expected return with the type default (6/6/6/5/4).
+    // Prefill the expected return with the type default (6/6/6/5/4) and a
+    // sensible contribution-limit vehicle: Roth -> IRA (a Roth IRA is far more
+    // common than a Roth 401k), tax-deferred -> employer plan.
     setAccount(i, {
       type,
       expected_return: DEFAULT_RETURNS[type],
       cost_basis: type === "taxable" ? input.accounts[i].cost_basis : null,
+      vehicle:
+        type === "roth" ? "ira" : type === "tax_deferred" ? "employer" : input.accounts[i].vehicle,
     });
   };
 
@@ -65,7 +69,7 @@ export function AccountsSection({ input, onChange, errors, dense }: SectionProps
               {(a.type === "tax_deferred" || a.type === "roth") && (
                 <SelectField
                   label="Vehicle"
-                  value={a.vehicle ?? "employer"}
+                  value={a.vehicle ?? (a.type === "roth" ? "ira" : "employer")}
                   onChange={(vehicle) => setAccount(i, { vehicle })}
                   options={VEHICLE_OPTIONS}
                   className={dense ? "" : "lg:col-span-2"}
