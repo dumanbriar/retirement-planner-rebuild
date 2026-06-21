@@ -76,7 +76,7 @@ flagged as requiring a backdoor Roth.
 | NIIT | IRC §1411 |
 | HSA rules | IRC §223; IRS Pub. 969 |
 | Basis step-up at death | IRC §1014 |
-| 2026 contribution limits & Roth-IRA MAGI phase-out | IRS 2026 COLA notice; IRC §402(g), §219, §408A |
+| 2026 contribution limits & Roth-IRA MAGI phase-out | IRS Notice 2025-67; IRC §402(g), §219, §408A |
 
 ## Documented simplifications
 

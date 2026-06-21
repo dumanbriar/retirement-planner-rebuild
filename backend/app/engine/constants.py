@@ -188,27 +188,30 @@ EARLY_WITHDRAWAL_PENALTY = 0.10
 EARLY_WITHDRAWAL_AGE = 60  # whole-year approximation of 59.5, documented
 
 # ---------------------------------------------------------------------------
-# Retirement-contribution limits, tax year 2026. Indexed annually; the engine
-# grows them by the plan inflation assumption from this base year (the IRS uses
-# rounded chained-CPI steps). Source: IRS Notice 2025-67 (2026 COLA limits).
+# Retirement-contribution limits, tax year 2026. Verified against IRS Notice
+# 2025-67 (the 2026 cost-of-living retirement-plan limits). Indexed annually;
+# the engine grows them by the plan inflation assumption from this base year
+# (the IRS uses rounded chained-CPI steps). UPDATE EACH NOVEMBER from the next
+# year's IRS COLA notice — tracked in CONSTANT_METADATA["contribution_limits"]
+# / ["roth_ira_phaseout"], which surface a stale-review flag in the UI/workbook.
 # These cap the Roth-vs-Traditional split optimizer's allocations and drive its
-# limit warnings. VERIFY against the IRS notice when updating.
+# limit warnings.
 #
 # 402(g) elective-deferral limit (401(k)/403(b)/457(b)) applies per person
 # across BOTH pre-tax and Roth deferrals within employer plans combined.
-ELECTIVE_DEFERRAL_LIMIT = 24_500
+ELECTIVE_DEFERRAL_LIMIT = 24_500           # 2026 (was $23,500 in 2025)
 ELECTIVE_DEFERRAL_CATCHUP_50 = 8_000       # age 50+ catch-up (IRC sec. 414(v))
 ELECTIVE_DEFERRAL_CATCHUP_60_63 = 11_250   # ages 60-63 (SECURE 2.0 sec. 109)
 # IRA limit (IRC sec. 219) applies per person across traditional + Roth IRA.
-IRA_CONTRIBUTION_LIMIT = 7_500
+IRA_CONTRIBUTION_LIMIT = 7_500             # 2026 (was $7,000 in 2025)
 IRA_CATCHUP_50 = 1_100                      # age 50+ (SECURE 2.0 sec. 108, indexed)
-# Roth IRA contribution MAGI phase-out ranges (IRC sec. 408A(c)(3)): direct
+# Roth IRA contribution MAGI phase-out ranges (IRC sec. 408A(c)(3)), 2026: direct
 # Roth IRA contributions phase out across (start, end); above `end` a direct
 # contribution is disallowed and a backdoor Roth is required. NOT applicable to
-# Roth 401(k) (employer Roth has no income limit).
+# Roth 401(k) (employer Roth has no income limit). MFS is $0–$10,000 (not modeled).
 ROTH_IRA_PHASEOUT = {
-    "single": (150_000, 165_000),
-    "mfj": (236_000, 246_000),
+    "single": (153_000, 168_000),
+    "mfj": (242_000, 252_000),
 }
 
 
@@ -295,12 +298,12 @@ CONSTANT_METADATA: dict[str, dict[str, str]] = {
     "contribution_limits": {
         "last_updated": "2025-11-01",
         "update_cycle": "annual-november",
-        "review_url": "https://www.irs.gov/retirement-plans/cost-of-living-adjustments-for-retirement-items",
+        "review_url": "https://www.irs.gov/pub/irs-drop/n-25-67.pdf",
     },
     "roth_ira_phaseout": {
         "last_updated": "2025-11-01",
         "update_cycle": "annual-november",
-        "review_url": "https://www.irs.gov/retirement-plans/amount-of-roth-ira-contributions-that-you-can-make-for-2026",
+        "review_url": "https://www.irs.gov/pub/irs-drop/n-25-67.pdf",
     },
 }
 
