@@ -271,12 +271,17 @@ CONSTANT_METADATA: dict[str, dict[str, str]] = {
         "review_url": "https://www.cms.gov/newsroom/fact-sheets/2026-medicare-parts-b-premiums-and-deductibles",
     },
     "fpl": {
-        "last_updated": "2025-01-22",
+        # 2025 HHS guidelines ($15,650 + $5,500/add'l) govern 2026 ACA coverage;
+        # re-verified 2026-06-21 (400% cliff = $62,600 single / $128,600 family-of-4).
+        "last_updated": "2026-06-21",
         "update_cycle": "annual-january",
         "review_url": "https://aspe.hhs.gov/topics/poverty-economic-mobility/poverty-guidelines",
     },
     "aca_applicable_pct": {
-        "last_updated": "2025-05-01",
+        # Re-verified 2026-06-21 against Rev. Proc. 2025-25: the 2026 table
+        # (2.10%–9.96%, 400% FPL cliff) is unchanged — enhanced ARPA/IRA credits
+        # expired 12/31/2025, so 2026 reverts to the original schedule + cliff.
+        "last_updated": "2026-06-21",
         "update_cycle": "annual-may",
         "review_url": "https://www.irs.gov/pub/irs-drop/rp-25-25.pdf",
     },
