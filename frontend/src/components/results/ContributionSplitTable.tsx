@@ -17,8 +17,8 @@ const sameSplit = (a: number[], b: number[]): boolean =>
 
 const HEADERS: { label: string; help: string; align?: "right" }[] = [
   {
-    label: "Split (% to Roth)",
-    help: "Share of each person's combined Traditional + Roth annual contribution routed to Roth; the remainder goes to Traditional (pre-tax). Each row is a full re-simulation of the plan.",
+    label: "Household % to Roth",
+    help: "Share of the household's total annual Traditional + Roth contributions routed to Roth; the remainder goes to Traditional (pre-tax). Each row is a full re-simulation. Because you file jointly, only the household ratio is modeled.",
   },
   {
     label: "Ending after-tax wealth",
@@ -56,15 +56,15 @@ export function ContributionSplitTable({
 
   return (
     <Card
-      title="Traditional vs Roth contribution split compared"
+      title="Traditional vs Roth contribution split — suggestion"
       help={
         <>
-          Every row is a full re-simulation that reallocates each person's annual contribution
-          between Traditional (pre-tax) and Roth, holding the total constant. Traditional's tax
-          deduction — valued at the real marginal bracket from salary — is reinvested in a taxable
-          account ("invest the tax savings"), so the comparison is equal-cost. The engine picks the
-          split with the highest ending after-tax wealth:{" "}
-          <span className="font-semibold">{splitLabel(chosen, personNames)}</span>.
+          Advisory only: your plan above still models the contributions you entered. Each row is a
+          full re-simulation at a different household Traditional/Roth split, holding the total
+          constant. Traditional's tax deduction — valued at the real marginal bracket from salary —
+          is reinvested in a taxable account ("invest the tax savings"), so the comparison is
+          equal-cost. The highest ending after-tax wealth is at{" "}
+          <span className="font-semibold">{splitLabel(chosen, personNames)}</span> to Roth.
         </>
       }
       bodyClassName="p-0 overflow-x-auto"
@@ -100,7 +100,7 @@ export function ContributionSplitTable({
                     {splitLabel(c.roth_pct, personNames)}
                     {isChosen && (
                       <span className="inline-flex items-center gap-1 rounded bg-brand-900 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-white">
-                        <Check className="h-3 w-3" /> chosen
+                        <Check className="h-3 w-3" /> suggested
                       </span>
                     )}
                     {c.is_current && (

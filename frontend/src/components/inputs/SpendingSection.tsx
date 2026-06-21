@@ -51,10 +51,10 @@ export function SpendingSection({ input, onChange, errors, dense }: SectionProps
         help="Evaluates every claiming-age combination (62–70 per person) and picks the one with the highest ending after-tax wealth, overriding the per-person claiming ages above. The full grid is shown in the results."
       />
       <CheckboxField
-        label="Optimize Traditional vs Roth contribution split"
+        label="Suggest the best Traditional vs Roth contribution split"
         checked={a.optimize_contribution_split}
         onChange={(optimize_contribution_split) => setA({ optimize_contribution_split })}
-        help="Re-simulates the plan across per-person Traditional/Roth contribution splits and picks the highest ending after-tax wealth. Needs each working person's salary (Household tab) to value the Traditional deduction — it reinvests the tax saving and respects per-vehicle IRS limits. The full comparison is shown in the results."
+        help="Advisory only — your plan still models the contributions you entered. Re-simulates across household Traditional/Roth split levels and shows which maximizes ending after-tax wealth. Needs each working person's salary (Household tab) to value the Traditional deduction; it reinvests the tax saving and respects per-vehicle IRS limits. The comparison appears in the results."
       />
     </div>
   );

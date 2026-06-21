@@ -253,8 +253,8 @@ class Metrics(BaseModel):
     success: bool
     chosen_conversion_strategy: str
     ss_claim_ages: list[int]
-    # Per-person fraction of the retirement-contribution budget routed to Roth
-    # under the chosen split (empty when the split optimizer was not run).
+    # Suggested household Roth fraction (single-element list) from the advisory
+    # split optimizer; empty when it was not run. Not applied to this projection.
     chosen_contribution_split: list[float] = []
 
 
@@ -285,8 +285,9 @@ class SSGridCell(BaseModel):
 class ContributionSplitCell(BaseModel):
     """One evaluated Traditional-vs-Roth contribution split (a full re-sim).
 
-    `roth_pct` is per person: the fraction of that person's combined
-    Traditional+Roth annual contribution routed to Roth.
+    `roth_pct` is a single-element list holding the HOUSEHOLD Roth fraction:
+    the share of total Traditional+Roth contributions routed to Roth (the
+    couple files jointly, so only the household ratio is meaningful).
     """
     roth_pct: list[float]
     ending_after_tax_real: float

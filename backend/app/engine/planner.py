@@ -100,13 +100,15 @@ def _retirement_budget(plan: PlanInput, owner: int) -> float:
                and a.type in (AccountType.tax_deferred, AccountType.roth))
 
 
-def _current_split(plan: PlanInput, owner: int) -> float:
-    budget = _retirement_budget(plan, owner)
-    if budget <= 0:
+def _current_household_split(plan: PlanInput) -> float:
+    """Household-wide current Roth fraction = total Roth contributions / total
+    Traditional+Roth contribution budget across all persons."""
+    total = sum(_retirement_budget(plan, i) for i in range(len(plan.persons)))
+    if total <= 0:
         return 0.0
-    roth = sum(a.annual_contribution for a in plan.accounts if a.owner == owner
-               and a.type == AccountType.roth)
-    return roth / budget
+    roth = sum(a.annual_contribution for a in plan.accounts
+               if a.type == AccountType.roth)
+    return roth / total
 
 
 def apply_split(plan: PlanInput, roth_pct: list[float]) -> PlanInput:
@@ -154,38 +156,46 @@ def _synth(plan: PlanInput, owner: int, type_: AccountType,
 def optimize_contribution_split(
         plan: PlanInput, strategy: ConversionStrategy, claim_ages: list[int]
 ) -> tuple[list[float], list[ContributionSplitCell]]:
-    """Exhaustive per-person Traditional-vs-Roth split search. Each candidate is
-    a full re-simulation; the objective is ending after-tax wealth (success
-    first). The household's current allocation is always included for context."""
+    """Suggest the household-wide Traditional-vs-Roth contribution split.
+
+    A couple files jointly, so only the household's total Roth fraction matters
+    (a dollar in either spouse's Roth is identical to the household). We search
+    a single percentage applied uniformly to both spouses rather than an
+    independent per-person grid. Each candidate is a full re-simulation; the
+    objective is ending after-tax wealth (success first). The household's
+    current allocation is included for context.
+
+    Returns (suggested split as a single-element [household_pct], cells). This
+    is ADVISORY: build_plan does not apply it to the projection. The returned
+    list has one element regardless of the number of persons.
+    """
     n = len(plan.persons)
-    current = [_current_split(plan, i) for i in range(n)]
-    has_budget = [_retirement_budget(plan, i) > 0 for i in range(n)]
-    if not any(has_budget):
-        return current, []
+    if sum(_retirement_budget(plan, i) for i in range(n)) <= 0:
+        return [], []
+    current = round(_current_household_split(plan), 4)
 
-    axes = [SPLIT_LEVELS if has_budget[i] else [current[i]] for i in range(n)]
-    combos = [[a] for a in axes[0]]
-    if n == 2:
-        combos = [[a, b] for a in axes[0] for b in axes[1]]
-
-    def key(s: list[float]) -> tuple:
-        return tuple(round(x, 4) for x in s)
-
-    evaluated = list(combos)
-    if key(current) not in {key(c) for c in combos}:
-        evaluated.append(current)
+    def score(m) -> float:
+        return (0 if m.depleted else 1e15) + m.ending_after_tax_real
 
     cells: list[ContributionSplitCell] = []
-    best, best_val = current, float("-inf")
-    for split in evaluated:
-        _, _, m = _run(apply_split(plan, split), strategy, claim_ages)
+    # the user's actual allocation — matches the headline projection
+    _, _, m_cur = _run(plan, strategy, claim_ages)
+    cells.append(ContributionSplitCell(
+        roth_pct=[current], ending_after_tax_real=m_cur.ending_after_tax_real,
+        lifetime_taxes_real=m_cur.lifetime_taxes_real,
+        depletion_age=m_cur.depletion_age, is_current=True))
+    best, best_val = [current], score(m_cur)
+
+    for pct in SPLIT_LEVELS:
+        if abs(pct - current) < 0.005:
+            continue  # the current cell already represents this household %
+        _, _, m = _run(apply_split(plan, [pct] * n), strategy, claim_ages)
         cells.append(ContributionSplitCell(
-            roth_pct=list(split), ending_after_tax_real=m.ending_after_tax_real,
+            roth_pct=[round(pct, 4)], ending_after_tax_real=m.ending_after_tax_real,
             lifetime_taxes_real=m.lifetime_taxes_real, depletion_age=m.depletion_age,
-            is_current=key(split) == key(current)))
-        val = (0 if m.depleted else 1e15) + m.ending_after_tax_real
-        if val > best_val:
-            best, best_val = list(split), val
+            is_current=False))
+        if score(m) > best_val:
+            best, best_val = [round(pct, 4)], score(m)
     return best, cells
 
 
@@ -318,10 +328,14 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
          "kind": "modeled", "source": "Bracket-fill conversions; 'auto' exhaustively "
                    "compares fill levels on ending after-tax wealth."},
         {"label": "Roth vs. Traditional contributions",
-         "value": "optimized" if a.optimize_contribution_split else "as entered",
+         "value": "split suggested (advisory)" if a.optimize_contribution_split
+                  else "as entered",
          "kind": "modeled",
-         "source": "When optimized, per-person Traditional/Roth contribution "
-                   "splits are exhaustively compared on ending after-tax wealth "
+         "source": "The projection always models the contributions you entered. "
+                   "When enabled, a single household Traditional/Roth split (the "
+                   "couple files jointly, so only the household ratio matters) is "
+                   "compared across levels on ending after-tax wealth and the best "
+                   "is shown as a suggestion — it is NOT applied to the projection "
                    "('invest the tax savings': the Traditional deduction, valued "
                    "at the real marginal bracket from salary, is reinvested in a "
                    "taxable account). Contribution caps are vehicle-aware per "
@@ -396,21 +410,21 @@ def build_plan(plan: PlanInput) -> PlanResult:
         # re-resolve the conversion strategy under the optimized claim ages
         strategy, comparisons = resolve_strategy(plan, claim_ages)
 
-    final_plan = plan
+    # The contribution-split optimizer is ADVISORY: it suggests the best
+    # household Traditional-vs-Roth split but does NOT change the modeled plan,
+    # which always reflects the user's entered allocation. (SS claiming and Roth
+    # conversions still apply, since those are plan parameters, not "your input
+    # vs a suggestion".)
     contribution_split: list[ContributionSplitCell] = []
     chosen_split: list[float] = []
     no_salary = not any(p.salary > 0 for p in plan.persons)
     if plan.assumptions.optimize_contribution_split:
         chosen_split, contribution_split = optimize_contribution_split(
             plan, strategy, claim_ages)
-        if contribution_split:
-            final_plan = apply_split(plan, chosen_split)
-            # re-resolve the conversion strategy under the chosen split
-            strategy, comparisons = resolve_strategy(final_plan, claim_ages)
 
-    sim, rows, metrics = _run(final_plan, strategy, claim_ages)
+    sim, rows, metrics = _run(plan, strategy, claim_ages)
     metrics.chosen_contribution_split = chosen_split
-    sens = sensitivity_scenarios(final_plan, strategy, claim_ages)
+    sens = sensitivity_scenarios(plan, strategy, claim_ages)
 
     if plan.assumptions.optimize_contribution_split and contribution_split and no_salary:
         sim.warnings.append(

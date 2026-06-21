@@ -296,21 +296,23 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
     if result.contribution_split:
         r += 2
         ws.cell(row=r, column=1,
-                value="Traditional vs. Roth contribution split "
-                      "(objective: ending after-tax wealth, today's $)").font = TITLE_FONT
+                value="Traditional vs. Roth contribution split — advisory "
+                      "suggestion (objective: ending after-tax wealth, today's "
+                      "$). The projection models the contributions as entered."
+                      ).font = TITLE_FONT
         r += 1
-        _sheet_header(ws, r, [f"{p.name} % to Roth" for p in persons] +
-                      ["Ending after-tax wealth (today's $)",
-                       "Lifetime taxes (today's $)", "Depleted at age",
-                       "Current", "Chosen"])
+        _sheet_header(ws, r, ["Household % to Roth",
+                              "Ending after-tax wealth (today's $)",
+                              "Lifetime taxes (today's $)", "Depleted at age",
+                              "Current", "Suggested"])
         r += 1
-        chosen = [round(x, 4) for x in m.chosen_contribution_split]
+        chosen = round(m.chosen_contribution_split[0], 4) if m.chosen_contribution_split else None
         for cell_ in result.contribution_split:
-            vals = [round(x * 100) for x in cell_.roth_pct] + [
-                cell_.ending_after_tax_real, cell_.lifetime_taxes_real,
-                cell_.depletion_age or "",
-                "current" if cell_.is_current else "",
-                "<= chosen" if [round(x, 4) for x in cell_.roth_pct] == chosen else ""]
+            vals = [round(cell_.roth_pct[0] * 100),
+                    cell_.ending_after_tax_real, cell_.lifetime_taxes_real,
+                    cell_.depletion_age or "",
+                    "current" if cell_.is_current else "",
+                    "<= suggested" if round(cell_.roth_pct[0], 4) == chosen else ""]
             for c, v in enumerate(vals, 1):
                 xc = ws.cell(row=r, column=c, value=v)
                 if isinstance(v, float):

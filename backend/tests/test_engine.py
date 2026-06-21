@@ -567,6 +567,47 @@ def test_backdoor_roth_flagged_for_high_earner():
     assert not any("backdoor" in w.lower() for w in emp.warnings)
 
 
+def test_split_optimizer_is_advisory_not_applied():
+    # The suggestion must NOT change the modeled projection. With a high salary
+    # the optimizer suggests all-Traditional, yet the plan must still reflect the
+    # entered 50/50 split — i.e. the same ending wealth as running the input.
+    plan = _saver(salary=300_000)  # 10k Roth + 10k Trad; suggestion will be 0% Roth
+    r = build_plan(plan)
+    assert r.metrics.chosen_contribution_split == [0.0]
+    direct = Simulator(plan, strategy=ConversionStrategy.none).run()[1]
+    assert math.isclose(r.metrics.ending_after_tax_real,
+                        direct.ending_after_tax_real, rel_tol=1e-9)
+
+
+def test_split_suggestion_is_single_household_value():
+    # A couple gets ONE suggested household split, not a per-person breakdown.
+    plan = PlanInput(
+        persons=[Person(name="A", current_age=40, retirement_age=65,
+                        death_age=90, salary=120_000),
+                 Person(name="B", current_age=40, retirement_age=65,
+                        death_age=90, salary=120_000)],
+        accounts=[
+            Account(name="A 401k", type=AccountType.tax_deferred, owner=0,
+                    vehicle=AccountVehicle.employer, balance=100_000,
+                    annual_contribution=15_000),
+            Account(name="A Roth", type=AccountType.roth, owner=0,
+                    vehicle=AccountVehicle.ira, balance=20_000,
+                    annual_contribution=5_000),
+            Account(name="B 401k", type=AccountType.tax_deferred, owner=1,
+                    vehicle=AccountVehicle.employer, balance=80_000,
+                    annual_contribution=10_000),
+            Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                    balance=20_000, cost_basis=20_000),
+        ],
+        annual_spending=70_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none,
+                                optimize_contribution_split=True))
+    r = build_plan(plan)
+    assert len(r.metrics.chosen_contribution_split) == 1
+    assert all(len(c.roth_pct) == 1 for c in r.contribution_split)
+    assert any(c.is_current for c in r.contribution_split)
+
+
 def test_apply_split_preserves_vehicle_totals():
     plan = _saver(salary=100_000)  # 10k Roth + 10k Trad in the employer bucket
     for pct in (0.0, 0.5, 1.0):
