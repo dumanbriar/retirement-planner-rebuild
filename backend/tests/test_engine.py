@@ -608,6 +608,42 @@ def test_split_suggestion_is_single_household_value():
     assert any(c.is_current for c in r.contribution_split)
 
 
+def test_split_cells_pair_each_split_with_best_conversions():
+    # Each split is shown at its best, including the Roth-conversion lever. In a
+    # large-tax-deferred household, the all-Traditional split should lean on
+    # conversions (a non-'none' strategy) to defuse later RMDs — even though the
+    # user's conversion toggle is OFF (the table always shows best-case).
+    plan = PlanInput(
+        persons=[Person(name="A", current_age=50, retirement_age=63, death_age=92,
+                        ss_monthly_at_fra=2600, ss_claim_age=70, salary=110_000),
+                 Person(name="B", current_age=50, retirement_age=63, death_age=92,
+                        ss_monthly_at_fra=2000, ss_claim_age=70, salary=90_000)],
+        accounts=[
+            Account(name="A 401k", type=AccountType.tax_deferred, owner=0,
+                    vehicle=AccountVehicle.employer, balance=1_500_000,
+                    annual_contribution=15_000),
+            Account(name="A Roth 401k", type=AccountType.roth, owner=0,
+                    vehicle=AccountVehicle.employer, balance=60_000,
+                    annual_contribution=8_000),
+            Account(name="B 401k", type=AccountType.tax_deferred, owner=1,
+                    vehicle=AccountVehicle.employer, balance=900_000,
+                    annual_contribution=12_000),
+            Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                    balance=120_000, cost_basis=120_000),
+        ],
+        annual_spending=110_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none,
+                                optimize_contribution_split=True))
+    r = build_plan(plan)
+    assert all(c.conversion_strategy for c in r.contribution_split)
+    all_trad = next(c for c in r.contribution_split if round(c.roth_pct[0], 2) == 0.0)
+    assert all_trad.conversion_strategy != "none"   # leans on conversions vs RMDs
+    # headline is unaffected by the table's best-case conversions (toggle is none)
+    direct = Simulator(plan, strategy=ConversionStrategy.none).run()[1]
+    assert math.isclose(r.metrics.ending_after_tax_real,
+                        direct.ending_after_tax_real, rel_tol=1e-9)
+
+
 def test_apply_split_preserves_vehicle_totals():
     plan = _saver(salary=100_000)  # 10k Roth + 10k Trad in the employer bucket
     for pct in (0.0, 0.5, 1.0):

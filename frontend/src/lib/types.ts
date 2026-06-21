@@ -255,11 +255,13 @@ export interface SSGridCell {
 }
 
 export interface ContributionSplitCell {
-  /** Per-person fraction of the contribution budget routed to Roth. */
+  /** Single-element list: the household Roth fraction (couple files jointly). */
   roth_pct: number[];
   ending_after_tax_real: number;
   lifetime_taxes_real: number;
   depletion_age: number | null;
+  /** Optimal Roth-conversion strategy paired with this split (best-case). */
+  conversion_strategy: string;
   is_current: boolean;
 }
 

@@ -1,5 +1,6 @@
 import { Check } from "lucide-react";
-import type { ContributionSplitCell, Metrics } from "../../lib/types";
+import type { ContributionSplitCell, ConversionStrategy, Metrics } from "../../lib/types";
+import { CONVERSION_STRATEGY_LABELS } from "../../lib/types";
 import { fmtCurrency, fmtCurrencyExact } from "../../lib/format";
 import { Card } from "../ui/Card";
 import { InfoTip } from "../ui/Tooltip";
@@ -11,6 +12,10 @@ function splitLabel(rothPct: number[], names: string[]): string {
     .join("  ·  ");
 }
 
+function conversionLabel(s: string): string {
+  return CONVERSION_STRATEGY_LABELS[s as ConversionStrategy] ?? s ?? "—";
+}
+
 const sameSplit = (a: number[], b: number[]): boolean =>
   a.length === b.length &&
   a.every((x, i) => Math.round(x * 100) === Math.round((b[i] ?? -1) * 100));
@@ -19,6 +24,10 @@ const HEADERS: { label: string; help: string; align?: "right" }[] = [
   {
     label: "Household % to Roth",
     help: "Share of the household's total annual Traditional + Roth contributions routed to Roth; the remainder goes to Traditional (pre-tax). Each row is a full re-simulation. Because you file jointly, only the household ratio is modeled.",
+  },
+  {
+    label: "Roth conversions",
+    help: "The Roth-conversion strategy that maximizes this split's outcome — each split is shown at its best. A Traditional-heavy split leans on bracket-filling conversions to drain the tax-deferred balance before RMDs hit; a Roth-heavy split needs fewer. Computed independently of your conversion toggle.",
   },
   {
     label: "Ending after-tax wealth",
@@ -59,17 +68,19 @@ export function ContributionSplitTable({
       title="Traditional vs Roth contribution split — suggestion"
       help={
         <>
-          Advisory only: your plan above still models the contributions you entered. Each row is a
-          full re-simulation at a different household Traditional/Roth split, holding the total
-          constant. Traditional's tax deduction — valued at the real marginal bracket from salary —
-          is reinvested in a taxable account ("invest the tax savings"), so the comparison is
-          equal-cost. The highest ending after-tax wealth is at{" "}
-          <span className="font-semibold">{splitLabel(chosen, personNames)}</span> to Roth.
+          Advisory only — your plan above still models the contributions and conversions you
+          entered. Each row re-simulates a different household Traditional/Roth split and pairs it
+          with its <span className="font-semibold">optimal Roth-conversion strategy</span>, so you
+          can see the RMD-vs-conversion tradeoff end to end: a Traditional-heavy split leans on
+          conversions to defuse later RMDs. Traditional's deduction is reinvested in taxable
+          ("invest the tax savings"), so each split is equal-cost. Because rows assume best-case
+          conversions, figures here can exceed your headline plan if you have conversions off. Best
+          result: <span className="font-semibold">{splitLabel(chosen, personNames)}</span> to Roth.
         </>
       }
       bodyClassName="p-0 overflow-x-auto"
     >
-      <table className="w-full min-w-[560px] text-sm">
+      <table className="w-full min-w-[680px] text-sm">
         <thead>
           <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
             {HEADERS.map((h) => (
@@ -109,6 +120,9 @@ export function ContributionSplitTable({
                       </span>
                     )}
                   </span>
+                </td>
+                <td className="px-4 py-2.5 text-slate-600">
+                  {conversionLabel(c.conversion_strategy)}
                 </td>
                 <td
                   className={`px-4 py-2.5 text-right tabular-nums ${

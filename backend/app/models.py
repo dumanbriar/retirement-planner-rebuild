@@ -293,6 +293,9 @@ class ContributionSplitCell(BaseModel):
     ending_after_tax_real: float
     lifetime_taxes_real: float
     depletion_age: Optional[int]
+    # Optimal Roth-conversion strategy paired with this split (best-case): the
+    # comparison shows each split at its best, including the conversion lever.
+    conversion_strategy: str = ""
     is_current: bool = False  # matches the household's current allocation
 
 

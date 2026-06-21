@@ -301,14 +301,14 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
                       "$). The projection models the contributions as entered."
                       ).font = TITLE_FONT
         r += 1
-        _sheet_header(ws, r, ["Household % to Roth",
+        _sheet_header(ws, r, ["Household % to Roth", "Best Roth conversions",
                               "Ending after-tax wealth (today's $)",
                               "Lifetime taxes (today's $)", "Depleted at age",
                               "Current", "Suggested"])
         r += 1
         chosen = round(m.chosen_contribution_split[0], 4) if m.chosen_contribution_split else None
         for cell_ in result.contribution_split:
-            vals = [round(cell_.roth_pct[0] * 100),
+            vals = [round(cell_.roth_pct[0] * 100), cell_.conversion_strategy,
                     cell_.ending_after_tax_real, cell_.lifetime_taxes_real,
                     cell_.depletion_age or "",
                     "current" if cell_.is_current else "",

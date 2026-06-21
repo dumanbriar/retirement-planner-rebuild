@@ -154,48 +154,58 @@ def _synth(plan: PlanInput, owner: int, type_: AccountType,
 
 
 def optimize_contribution_split(
-        plan: PlanInput, strategy: ConversionStrategy, claim_ages: list[int]
+        plan: PlanInput, claim_ages: list[int]
 ) -> tuple[list[float], list[ContributionSplitCell]]:
     """Suggest the household-wide Traditional-vs-Roth contribution split.
 
     A couple files jointly, so only the household's total Roth fraction matters
     (a dollar in either spouse's Roth is identical to the household). We search
     a single percentage applied uniformly to both spouses rather than an
-    independent per-person grid. Each candidate is a full re-simulation; the
-    objective is ending after-tax wealth (success first). The household's
-    current allocation is included for context.
+    independent per-person grid.
 
-    Returns (suggested split as a single-element [household_pct], cells). This
-    is ADVISORY: build_plan does not apply it to the projection. The returned
-    list has one element regardless of the number of persons.
+    Each split is shown at its BEST: Roth conversions are re-optimized for it
+    (forced to 'auto') so the RMD-vs-conversion tradeoff is visible end-to-end —
+    a Traditional-heavy split leans on aggressive conversions, a Roth-heavy one
+    needs few. Reuses resolve_strategy (the conversion optimizer); the objective
+    is ending after-tax wealth (success first).
+
+    Returns (suggested split as a single-element [household_pct], cells). This is
+    ADVISORY: build_plan does not apply it to the projection, and because the
+    cells assume optimal conversions their figures can exceed the headline plan
+    when the user's conversion setting is off.
     """
     n = len(plan.persons)
     if sum(_retirement_budget(plan, i) for i in range(n)) <= 0:
         return [], []
     current = round(_current_household_split(plan), 4)
 
-    def score(m) -> float:
-        return (0 if m.depleted else 1e15) + m.ending_after_tax_real
+    def evaluate(p: PlanInput) -> tuple[str, StrategyComparison]:
+        # best achievable for this split: optimize Roth conversions (force auto)
+        p.assumptions.roth_conversion_strategy = ConversionStrategy.auto
+        best_strat, comps = resolve_strategy(p, claim_ages)
+        bc = next(c for c in comps if c.strategy == best_strat.value)
+        return best_strat.value, bc
 
-    cells: list[ContributionSplitCell] = []
-    # the user's actual allocation — matches the headline projection
-    _, _, m_cur = _run(plan, strategy, claim_ages)
-    cells.append(ContributionSplitCell(
-        roth_pct=[current], ending_after_tax_real=m_cur.ending_after_tax_real,
-        lifetime_taxes_real=m_cur.lifetime_taxes_real,
-        depletion_age=m_cur.depletion_age, is_current=True))
-    best, best_val = [current], score(m_cur)
+    def cell(pct: float, is_current: bool, p: PlanInput) -> ContributionSplitCell:
+        conv, bc = evaluate(p)
+        return ContributionSplitCell(
+            roth_pct=[round(pct, 4)], ending_after_tax_real=bc.ending_after_tax_real,
+            lifetime_taxes_real=bc.lifetime_taxes_real, depletion_age=bc.depletion_age,
+            conversion_strategy=conv, is_current=is_current)
+
+    def score(c: ContributionSplitCell) -> float:
+        return (0 if c.depletion_age is not None else 1e15) + c.ending_after_tax_real
+
+    cells = [cell(current, True, copy.deepcopy(plan))]
+    best, best_val = [current], score(cells[0])
 
     for pct in SPLIT_LEVELS:
         if abs(pct - current) < 0.005:
             continue  # the current cell already represents this household %
-        _, _, m = _run(apply_split(plan, [pct] * n), strategy, claim_ages)
-        cells.append(ContributionSplitCell(
-            roth_pct=[round(pct, 4)], ending_after_tax_real=m.ending_after_tax_real,
-            lifetime_taxes_real=m.lifetime_taxes_real, depletion_age=m.depletion_age,
-            is_current=False))
-        if score(m) > best_val:
-            best, best_val = [round(pct, 4)], score(m)
+        c = cell(pct, False, apply_split(plan, [pct] * n))
+        cells.append(c)
+        if score(c) > best_val:
+            best, best_val = [round(pct, 4)], score(c)
     return best, cells
 
 
@@ -420,7 +430,7 @@ def build_plan(plan: PlanInput) -> PlanResult:
     no_salary = not any(p.salary > 0 for p in plan.persons)
     if plan.assumptions.optimize_contribution_split:
         chosen_split, contribution_split = optimize_contribution_split(
-            plan, strategy, claim_ages)
+            plan, claim_ages)
 
     sim, rows, metrics = _run(plan, strategy, claim_ages)
     metrics.chosen_contribution_split = chosen_split
