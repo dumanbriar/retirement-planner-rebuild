@@ -16,6 +16,12 @@ function conversionLabel(s: string): string {
   return CONVERSION_STRATEGY_LABELS[s as ConversionStrategy] ?? s ?? "—";
 }
 
+/** Natural-language phrase for the footer, e.g. "Fill 10% bracket conversions"
+ * or "no Roth conversions" (so the none case doesn't read "No conversions conversions"). */
+function conversionPhrase(s: string): string {
+  return !s || s === "none" ? "no Roth conversions" : `${conversionLabel(s)} conversions`;
+}
+
 const sameSplit = (a: number[], b: number[]): boolean =>
   a.length === b.length &&
   a.every((x, i) => Math.round(x * 100) === Math.round((b[i] ?? -1) * 100));
@@ -156,9 +162,11 @@ export function ContributionSplitTable({
         if (delta <= 100) return null;
         return (
           <p className="border-t border-slate-100 px-4 py-2.5 text-xs text-slate-500">
-            Shifting from your current split ({splitLabel(currentCell.roth_pct, personNames)}) to{" "}
+            Shifting from your current split ({splitLabel(currentCell.roth_pct, personNames)},{" "}
+            {conversionPhrase(currentCell.conversion_strategy)}) to{" "}
             <span className="font-medium text-slate-700">
-              {splitLabel(chosenCell.roth_pct, personNames)}
+              {splitLabel(chosenCell.roth_pct, personNames)} with{" "}
+              {conversionPhrase(chosenCell.conversion_strategy)}
             </span>{" "}
             adds <span className="font-medium text-slate-700">{fmtCurrency(delta)}</span> of ending
             after-tax wealth in today's dollars.
