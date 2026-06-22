@@ -11,12 +11,14 @@ import {
   RefreshCw,
   RotateCcw,
   Settings2,
+  ShieldCheck,
   Users,
   Wallet,
 } from "lucide-react";
 import type { PlanInput } from "../../lib/types";
 import { ACCOUNT_TYPE_SHORT, CONVERSION_STRATEGY_LABELS } from "../../lib/types";
 import { fmtCurrency, fmtPct } from "../../lib/format";
+import { InfoTip } from "../ui/Tooltip";
 import type { FieldErrors } from "../../lib/validate";
 import { HouseholdSection } from "./HouseholdSection";
 import { AccountsSection } from "./AccountsSection";
@@ -244,6 +246,14 @@ export function Sidebar({
         ) : (
           <p className="text-center text-xs text-slate-400">Results reflect current inputs.</p>
         )}
+        <p className="mt-2.5 flex items-center justify-center gap-1 text-center text-[11px] text-slate-400">
+          <ShieldCheck className="h-3 w-3 shrink-0" />
+          Your inputs stay in this browser
+          <InfoTip
+            content="Inputs are saved only in this browser (localStorage) and sent to the calculation engine over HTTPS solely to compute your plan — nothing is stored on a server, logged, or shared with any third party (no accounts, no analytics). 'Reset to sample data' clears the local copy."
+            wide
+          />
+        </p>
       </div>
     </aside>
   );

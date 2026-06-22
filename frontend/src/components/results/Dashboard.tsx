@@ -122,7 +122,8 @@ export function Dashboard({
       <p className="pb-4 text-center text-[11px] text-slate-400">
         Deterministic planning model — not investment, tax, or legal advice. Statutory parameters
         are 2026 values indexed at the assumed inflation rate; see the assumptions strip for
-        provenance of every modeling choice.
+        provenance of every modeling choice. Your inputs stay in your browser and are sent to the
+        stateless engine only to compute — nothing is stored on a server or shared.
       </p>
     </div>
   );

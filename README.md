@@ -9,7 +9,19 @@ screen is reproducible from the exported Excel workbook.
 
 - **Frontend**: React + Vite + TypeScript + Tailwind + Recharts (deployed to Vercel)
 - **Backend**: Python FastAPI projection engine (deployed to Railway)
-- No accounts, no logins, no stored data — inputs live in the advisor's browser.
+- No accounts, no logins, no server-side storage (see **Data & privacy** below).
+
+## Data & privacy
+
+Inputs you enter are saved **only in your browser** (`localStorage`) and are sent
+to the projection engine over HTTPS **solely to compute** the plan and the Excel
+workbook. The engine is **stateless**: it holds the data in memory for the
+request, returns the result, and keeps nothing — no database, no file writes, no
+logging of inputs, and no analytics or third-party calls (the whole backend
+dependency set is FastAPI / uvicorn / openpyxl / pydantic / slowapi). API requests
+go from the browser **directly to the engine**, not through the static host.
+"Reset to sample data" clears the local copy; on a shared computer the saved plan
+persists in that browser until cleared.
 
 ## What it models
 
