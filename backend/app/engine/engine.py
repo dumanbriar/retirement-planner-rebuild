@@ -523,9 +523,14 @@ class Simulator:
         row.rmd_by_person = rmds
 
         # a home purchase this year: fund the down payment from the portfolio
-        # (cash -> taxable -> ... via the waterfall). Penalties for raiding
-        # tax-advantaged accounts are folded into tax so they aren't free.
+        # (cash -> taxable -> ... via the waterfall). The down payment does NOT
+        # reduce contributions — that year's full contributions are made above,
+        # and the down payment is drawn from accumulated assets. Penalties for
+        # raiding tax-advantaged accounts are folded into tax so they aren't free.
         if home_purchase > 0:
+            adv = (AccountType.tax_deferred, AccountType.roth, AccountType.hsa)
+            adv_before = sum(scratch.withdrawals_by_type.get(t.value, 0.0) for t in adv)
+            pen_before = scratch.penalties
             got = self.waterfall_withdraw(home_purchase, scratch, year)
             row.home_purchase = home_purchase
             row.total_tax += scratch.penalties
@@ -535,6 +540,26 @@ class Simulator:
                 row.shortfall = home_purchase - got
                 row.flags = list(row.flags) + [
                     "Portfolio could not fully fund the home down payment"]
+            # If cash + taxable couldn't cover the down payment, the waterfall
+            # raided tax-advantaged retirement accounts (a pre-59.5 draw also
+            # incurs a 10% penalty). Surface that as an actionable plan-level
+            # warning rather than only a quiet per-year row flag.
+            raided = sum(scratch.withdrawals_by_type.get(t.value, 0.0)
+                         for t in adv) - adv_before
+            if raided > 1:
+                penalized = scratch.penalties - pen_before > 1
+                msg = (
+                    f"The home down payment in {year} exceeds your projected cash "
+                    "and taxable savings, so the model funds the rest from "
+                    "tax-advantaged retirement accounts"
+                    + (" (incurring a 10% early-withdrawal penalty before age 59.5)"
+                       if penalized else "")
+                    + ". Your retirement contributions are not reduced to pay for the "
+                    "purchase — to model saving toward it instead, hold more in "
+                    "taxable/cash by then, or lower your contributions in the years "
+                    "before the purchase.")
+                if msg not in self.warnings:
+                    self.warnings.append(msg)
 
         self._check_contribution_limits(year, row)
         row.withdrawals_by_type = scratch.withdrawals_by_type

@@ -412,6 +412,65 @@ def test_purchase_year_records_home_purchase_outflow():
     assert by_year[2042].home_purchase == 0
 
 
+def _pre_retirement_buyer(**kw) -> PlanInput:
+    """A 50-yo who retires at 65, so a purchase before 65 lands in accumulation
+    (where the down payment competes with that year's contributions)."""
+    defaults = dict(
+        persons=[Person(name="Sam", current_age=50, retirement_age=65, death_age=90)],
+        accounts=[
+            Account(name="401(k)", type=AccountType.tax_deferred, owner=0,
+                    balance=500_000, annual_contribution=20_000, expected_return=0.05),
+            Account(name="Cash", type=AccountType.cash, owner=0, balance=5_000,
+                    annual_contribution=0, expected_return=0.04),
+            Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                    balance=5_000, cost_basis=5_000, annual_contribution=0,
+                    expected_return=0.05),
+        ],
+        annual_spending=40_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none,
+                                inflation=0.025,
+                                contributions_grow_with_inflation=False),
+    )
+    defaults.update(kw)
+    return PlanInput(**defaults)
+
+
+def test_pre_retirement_down_payment_raids_tax_advantaged_warns():
+    # A $100k down payment at age 55 (2031) dwarfs cash+taxable (~$10k), so the
+    # waterfall must raid the 401(k) — pre-59.5, so a penalty applies.
+    plan = _pre_retirement_buyer(liabilities=[Liability(
+        name="Future home", balance=0, interest_rate=0.0,
+        annual_payment=0, start_age=55, down_payment=100_000)])
+    sim = Simulator(plan, strategy=ConversionStrategy.none)
+    rows, _ = sim.run()
+    # the actionable plan-level warning fires exactly once
+    raid = [w for w in sim.warnings if "down payment in 2031" in w]
+    assert len(raid) == 1
+    assert "tax-advantaged" in raid[0] and "not reduced" in raid[0]
+    assert "early-withdrawal penalty" in raid[0]  # pre-59.5 raid is penalized
+    # contributions are NOT reduced: the buy-year 401(k) contribution is still
+    # the full entered $20k (growth-with-inflation is off in this fixture)
+    buy = next(y for y in rows if y.year == 2031)
+    k401 = next(a for a in buy.accounts if a.name == "401(k)")
+    assert math.isclose(k401.contribution, 20_000, abs_tol=0.01)
+
+
+def test_down_payment_covered_by_cash_raises_no_raid_warning():
+    # Same purchase, but ample cash fully funds it — no tax-advantaged raid.
+    plan = _pre_retirement_buyer(
+        accounts=[
+            Account(name="401(k)", type=AccountType.tax_deferred, owner=0,
+                    balance=500_000, annual_contribution=20_000, expected_return=0.05),
+            Account(name="Cash", type=AccountType.cash, owner=0, balance=300_000,
+                    annual_contribution=0, expected_return=0.04),
+        ],
+        liabilities=[Liability(name="Future home", balance=0, interest_rate=0.0,
+                               annual_payment=0, start_age=55, down_payment=100_000)])
+    sim = Simulator(plan, strategy=ConversionStrategy.none)
+    sim.run()
+    assert not any("down payment in 2031" in w for w in sim.warnings)
+
+
 def test_existing_liability_backward_compatible():
     # start_age=None must behave exactly like the pre-feature liability.
     liab = dict(name="Mortgage", balance=200_000, interest_rate=0.04,

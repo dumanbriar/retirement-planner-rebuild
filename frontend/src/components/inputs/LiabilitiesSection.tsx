@@ -73,7 +73,7 @@ export function LiabilitiesSection({ input, onChange, errors, dense }: SectionPr
                   min={0}
                   prefix="$"
                   error={e("down_payment")}
-                  help="One-time cash at purchase (down payment + closing), in actual (future) dollars at the purchase date. Drawn from the portfolio in the purchase year."
+                  help="One-time cash at purchase (down payment + closing), in actual (future) dollars at the purchase date. Drawn from the portfolio in the purchase year — cash and taxable accounts first, then tax-advantaged accounts (with an early-withdrawal penalty before age 59½ and a warning) if those fall short. Your retirement contributions are not reduced to fund it; to save toward it instead, lower your contributions in the years before."
                 />
               )}
             </div>

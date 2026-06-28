@@ -330,7 +330,13 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
                    "reflects only the new debt and the cash spent — it understates reality "
                    "by roughly the property's value. Pre-retirement mortgage payments are "
                    "assumed covered by (unmodeled) wages, as with existing debts; the down "
-                   "payment is always drawn from the portfolio."},
+                   "payment is always drawn from the portfolio. Your entered retirement "
+                   "contributions are NOT reduced in the purchase year — the full "
+                   "contribution is made and the down payment is then drawn from accumulated "
+                   "assets (cash and taxable first; if those fall short it draws from "
+                   "tax-advantaged accounts, with a 10% early-withdrawal penalty before age "
+                   "59.5 and a warning). To model funding the purchase by saving less, lower "
+                   "your contributions for the relevant years."},
         {"label": "Withdrawal order", "value": "cash > taxable > tax-deferred > Roth > HSA",
          "kind": "modeled", "source": "Conventional tax-efficient sequencing; HSA reserved "
                    "for qualified medical first (tax-free per IRC sec. 223)."},
