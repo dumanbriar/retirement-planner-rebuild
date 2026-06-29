@@ -1,0 +1,139 @@
+name: Test & Deploy (legacy v2)
+
+# Parallel "v2" stack for the legacy-asset expansion. Deploys the SAME repo to a
+# SEPARATE backend (Railway service `backend-legacy`) and a SEPARATE Vercel project
+# (`horizon-retirement-legacy`), so v2 runs at its own URL alongside the frozen v1
+# production stack. v1 is published by deploy.yml (main / laughing-pasteur) and is
+# never touched here.
+#
+# One-time prerequisite (cannot be done from CI): create a service named
+# `backend-legacy` in the existing Railway project so the project-token deploy has a
+# target. The existing RAILWAY_TOKEN / VERCEL_TOKEN secrets are reused as-is.
+
+on:
+  push:
+    branches: ["claude/busy-lamport-5ziq0f"]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-legacy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend deps
+        run: pip install -r backend/requirements.txt pytest
+      - name: Run engine tests
+        run: cd backend && python -m pytest tests/ -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Frontend typecheck & build
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Railway & Vercel CLIs
+        run: npm install -g @railway/cli vercel
+
+      - name: Deploy backend to Railway (backend-legacy)
+        id: railway
+        env:
+          RAILWAY_DEPLOY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          # Target the parallel v2 service. scripts/deploy_railway.sh honors this
+          # override (defaults to "backend" for the v1 stack).
+          RAILWAY_SERVICE_NAME: backend-legacy
+        run: bash scripts/deploy_railway.sh
+
+      - name: Wait for backend health
+        run: |
+          URL="${{ steps.railway.outputs.backend_url }}"
+          for i in $(seq 1 60); do
+            if curl -sf --max-time 10 "$URL/health" | grep -q ok; then
+              echo "backend healthy"; exit 0
+            fi
+            echo "waiting for backend ($i)..."; sleep 10
+          done
+          echo "backend did not become healthy in time"; exit 1
+
+      - name: Smoke-test the engine API
+        run: |
+          URL="${{ steps.railway.outputs.backend_url }}"
+          cat > /tmp/req.json <<'JSON'
+          {"persons":[{"name":"Sam","current_age":55,"retirement_age":65,"death_age":92,
+            "ss_monthly_at_fra":2800,"ss_claim_age":67}],
+           "accounts":[{"name":"401k","type":"tax_deferred","owner":0,"balance":850000,
+            "annual_contribution":30000}],
+           "annual_spending":80000,
+           "assumptions":{"roth_conversion_strategy":"none"}}
+          JSON
+          code=$(curl -s -o /tmp/plan.json -w "%{http_code}" --max-time 60 \
+            -H "Content-Type: application/json" -d @/tmp/req.json "$URL/api/plan")
+          test "$code" = "200"
+          grep -q nest_egg_at_retirement /tmp/plan.json
+          echo "engine smoke test passed"
+
+      - name: Deploy frontend to Vercel (horizon-retirement-legacy)
+        id: vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          cd frontend
+          # `vercel link` auto-creates the project on first run with the token.
+          vercel link --yes --project horizon-retirement-legacy --token "$VERCEL_TOKEN"
+          vercel deploy --prod --yes --token "$VERCEL_TOKEN" \
+            --build-env VITE_API_URL="${{ steps.railway.outputs.backend_url }}" \
+            > /tmp/deploy_out.txt 2> /tmp/deploy_err.txt \
+            || { cat /tmp/deploy_out.txt /tmp/deploy_err.txt; exit 1; }
+          cat /tmp/deploy_out.txt /tmp/deploy_err.txt
+          # the stable public URL is the production ALIAS, not the
+          # deployment-specific URL (which Vercel SSO-protects by default)
+          ALIAS=$(grep -hoE 'Aliased[[:space:]]+https://[a-z0-9.-]+\.vercel\.app' \
+                    /tmp/deploy_out.txt /tmp/deploy_err.txt \
+                  | grep -oE 'https://[a-z0-9.-]+\.vercel\.app' | head -1)
+          DEPLOY_URL=$(grep -hoE 'https://[a-z0-9.-]+\.vercel\.app' /tmp/deploy_out.txt | head -1)
+          # best-effort: turn off Deployment Protection so deployment URLs
+          # are public too (a no-auth advisor tool; nothing sensitive served)
+          curl -s -X PATCH "https://api.vercel.com/v9/projects/horizon-retirement-legacy" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" \
+            -d '{"ssoProtection": null}' -o /tmp/patch.json || true
+          head -c 200 /tmp/patch.json || true; echo
+          URL="${ALIAS:-$DEPLOY_URL}"
+          test -n "$URL"
+          echo "frontend_url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Frontend URL: $URL"
+
+      - name: Verify frontend serves
+        run: |
+          URL="${{ steps.vercel.outputs.frontend_url }}"
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$URL")
+            if [ "$code" = "200" ]; then echo "frontend live"; exit 0; fi
+            echo "frontend status $code, waiting ($i)..."; sleep 5
+          done
+          exit 1
+
+      - name: Summary
+        run: |
+          {
+            echo "## Deployed (legacy v2)"
+            echo "- Frontend: ${{ steps.vercel.outputs.frontend_url }}"
+            echo "- Backend: ${{ steps.railway.outputs.backend_url }}"
+          } >> "$GITHUB_STEP_SUMMARY"
