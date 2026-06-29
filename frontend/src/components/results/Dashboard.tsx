@@ -12,6 +12,7 @@ import { TaxChart } from "./TaxChart";
 import { ConversionTable } from "./ConversionTable";
 import { SSGridTable } from "./SSGridTable";
 import { SensitivityTable } from "./SensitivityTable";
+import { LegacyPanel } from "./LegacyPanel";
 import { YearTable } from "./YearTable";
 
 export function Dashboard({
@@ -109,6 +110,8 @@ export function Dashboard({
       <SSGridTable grid={result.ss_grid} metrics={result.metrics} personNames={personNames} />
 
       <SensitivityTable rows={result.sensitivity} metrics={result.metrics} />
+
+      <LegacyPanel result={result} mode={mode} inflation={inflation} />
 
       <YearTable {...chartProps} />
 

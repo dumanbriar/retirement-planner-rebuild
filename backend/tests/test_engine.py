@@ -274,7 +274,8 @@ def test_excel_workbook_builds():
     from openpyxl import load_workbook
     wb = load_workbook(io.BytesIO(data))
     assert {"Summary", "Assumptions", "Accumulation", "Retirement",
-            "Account Detail", "Strategies", "Sensitivity"} <= set(wb.sheetnames)
+            "Account Detail", "Strategies", "Legacy & Estate",
+            "Sensitivity"} <= set(wb.sheetnames)
 
 
 # --------------------------------------------------------- C1: ACA below FPL
@@ -420,3 +421,88 @@ def test_existing_liability_backward_compatible():
     # active from year 1, no down-payment event ever
     assert rows[0].total_liabilities > 0
     assert all(y.home_purchase == 0 for y in rows)
+
+
+# --------------------------------------------------- legacy foundation (Phase 1)
+def _legacy_row(accounts, year=2063, liabilities=0.0):
+    from app.models import YearRow
+    return YearRow(year=year, ages=[None, None], phase="retirement",
+                   filing_status="single", accounts=accounts,
+                   total_liabilities=liabilities)
+
+
+def test_settle_estate_dispatch_by_character_and_destination():
+    # heir rate 24%. Four assets, one bequeathed to charity.
+    from app.models import AccountYear
+    sim = Simulator(couple_plan(), strategy=ConversionStrategy.none)
+    accts = [
+        AccountYear(name="401k", type=AccountType.tax_deferred, owner=0,
+                    start_balance=100_000, contribution=0, withdrawal=0, growth=0,
+                    end_balance=100_000, transfer_character="ird"),          # -> $76k
+        AccountYear(name="Brokerage", type=AccountType.taxable, owner=0,
+                    start_balance=100_000, contribution=0, withdrawal=0, growth=0,
+                    end_balance=100_000, transfer_character="step_up"),      # -> $100k
+        AccountYear(name="Roth", type=AccountType.roth, owner=0,
+                    start_balance=50_000, contribution=0, withdrawal=0, growth=0,
+                    end_balance=50_000, transfer_character="tax_free"),      # -> $50k
+        AccountYear(name="IRA bequest", type=AccountType.tax_deferred, owner=0,
+                    start_balance=20_000, contribution=0, withdrawal=0, growth=0,
+                    end_balance=20_000, transfer_character="ird",
+                    beneficiary="charity"),                                  # -> charity, $0 tax
+    ]
+    after_tax, legacy = sim.settle_estate(_legacy_row(accts))
+    # IRD tax only on the $100k inherited 401(k): 100,000 * 0.24 = 24,000
+    assert math.isclose(legacy.ird_tax, 24_000, abs_tol=0.01)
+    # heirs receive 76,000 + 100,000 + 50,000 = 226,000
+    assert math.isclose(legacy.to_heirs_net, 226_000, abs_tol=0.01)
+    assert math.isclose(after_tax, 226_000, abs_tol=0.01)
+    # charity receives the bequest tax-free (a charity pays no income tax on IRD)
+    assert math.isclose(legacy.to_charity, 20_000, abs_tol=0.01)
+    # every asset row reconciles: net == gross - tax
+    for a in legacy.assets:
+        assert math.isclose(a.net, a.gross - a.tax, abs_tol=0.01)
+
+
+def test_settle_estate_subtracts_liabilities():
+    from app.models import AccountYear
+    sim = Simulator(couple_plan(), strategy=ConversionStrategy.none)
+    accts = [AccountYear(name="Brokerage", type=AccountType.taxable, owner=0,
+                         start_balance=300_000, contribution=0, withdrawal=0,
+                         growth=0, end_balance=300_000, transfer_character="step_up")]
+    after_tax, legacy = sim.settle_estate(_legacy_row(accts, liabilities=50_000))
+    assert math.isclose(legacy.to_heirs_net, 250_000, abs_tol=0.01)
+    assert math.isclose(after_tax, 250_000, abs_tol=0.01)
+
+
+def test_settle_estate_reproduces_pre_refactor_terminal_formula():
+    # Golden regression: ending_after_tax_real must equal the original inline
+    # terminal calculation (TD/HSA discounted at heir rate, else full value,
+    # minus liabilities) — the settle_estate extraction must be value-identical.
+    plan = couple_plan()
+    sim = Simulator(plan, strategy=ConversionStrategy.fill_12)
+    rows, metrics = sim.run()
+    last = rows[-1]
+    expected = 0.0
+    for x in last.accounts:
+        if x.type in (AccountType.tax_deferred, AccountType.hsa):
+            expected += x.end_balance * (1 - plan.assumptions.heir_tax_rate)
+        else:
+            expected += x.end_balance
+    expected -= last.total_liabilities
+    assert math.isclose(metrics.ending_after_tax_real,
+                        expected / sim.infl(last.year), rel_tol=1e-9)
+
+
+def test_legacy_result_wired_into_plan_and_reconciles():
+    plan = couple_plan()
+    result = build_plan(plan)
+    legacy = result.legacy
+    assert legacy is not None
+    # ending_after_tax_real and net_to_heirs_real are the same quantity
+    assert math.isclose(result.metrics.ending_after_tax_real,
+                        result.metrics.net_to_heirs_real, rel_tol=1e-9)
+    # to_heirs_net = sum(net of heir-bound assets) - liabilities; with no charity
+    # bequests and no debt at death this equals gross - ird_tax
+    assert math.isclose(legacy.to_heirs_net,
+                        legacy.to_heirs_gross - legacy.ird_tax, abs_tol=1.0)
+    assert legacy.to_charity == 0  # no bequests configured in the base plan

@@ -28,6 +28,18 @@ DEFAULT_RETURNS = {
 }
 
 
+class TransferCharacter(str, Enum):
+    """How an asset is taxed when it passes to its beneficiary at death."""
+    tax_free = "tax_free"  # Roth; life-insurance death benefit (IRC §101)
+    step_up = "step_up"    # basis reset at death, no income tax (IRC §1014)
+    ird = "ird"            # income in respect of a decedent (IRC §691; §72)
+
+
+class Beneficiary(str, Enum):
+    heirs = "heirs"
+    charity = "charity"
+
+
 class Person(BaseModel):
     name: str = "You"
     current_age: int = Field(ge=18, le=99)
@@ -157,6 +169,13 @@ class AccountYear(BaseModel):
     growth: float
     end_balance: float
     cost_basis: Optional[float] = None  # taxable accounts
+    # Legacy-asset flows (default 0 / "account" so existing rows are unchanged).
+    premium: float = 0                  # insurance premium outflow
+    distribution: float = 0             # annuity payout / private distribution out
+    death_benefit_paid: float = 0       # life-insurance death benefit paid to estate
+    asset_class: str = "account"        # account | insurance | annuity | private | realestate
+    transfer_character: Optional[str] = None  # TransferCharacter value
+    beneficiary: str = "heirs"          # Beneficiary value
 
 
 class YearRow(BaseModel):
@@ -182,6 +201,11 @@ class YearRow(BaseModel):
     roth_conversion: float = 0
     surplus_reinvested: float = 0
     shortfall: float = 0                # unmet spending (plan failure)
+    premiums_paid: float = 0            # insurance premiums this year
+    legacy_distributions: float = 0     # annuity/private distributions this year
+    death_benefits_paid: float = 0      # life-insurance proceeds received this year
+    qcd_amount: float = 0               # qualified charitable distribution (IRC §408(d)(8))
+    gifts_made: float = 0               # lifetime gifts out of the portfolio this year
 
     # tax detail (nominal $)
     dividends: float = 0
@@ -223,6 +247,12 @@ class Metrics(BaseModel):
     success: bool
     chosen_conversion_strategy: str
     ss_claim_ages: list[int]
+    # Legacy / estate (today's dollars). Estate transfer tax is NOT modeled.
+    gross_estate_real: float = 0         # to heirs + to charity, before heir income tax
+    net_to_heirs_real: float = 0         # after IRD income tax, net of liabilities
+    estate_ird_tax_real: float = 0       # ordinary income tax heirs owe on IRD assets
+    to_charity_real: float = 0           # charitable bequests
+    gifts_made_total_real: float = 0     # cumulative lifetime gifts
 
 
 class SensitivityRow(BaseModel):
@@ -249,6 +279,29 @@ class SSGridCell(BaseModel):
     depletion_age: Optional[int]
 
 
+class LegacyAssetResult(BaseModel):
+    """One asset's at-death disposition for the Legacy / Estate view."""
+    name: str
+    asset_class: str           # account | insurance | annuity | private | realestate
+    transfer_character: str    # TransferCharacter value
+    beneficiary: str           # Beneficiary value
+    gross: float               # value passing (today's dollars)
+    tax: float                 # heir income tax (IRD); 0 for step-up/tax-free
+    net: float                 # gross - tax
+
+
+class LegacyResult(BaseModel):
+    at_death_year: int                       # primary person's death year
+    assets: list[LegacyAssetResult] = []
+    to_heirs_gross: float = 0
+    to_heirs_net: float = 0                   # net of IRD tax and liabilities
+    to_charity: float = 0
+    ird_tax: float = 0
+    gifts_lifetime: float = 0
+    exemption_used: float = 0                 # cumulative gift/estate exemption consumed
+    # All figures in today's dollars. Federal/state estate tax is NOT modeled.
+
+
 class PlanResult(BaseModel):
     metrics: Metrics
     years: list[YearRow]
@@ -257,3 +310,4 @@ class PlanResult(BaseModel):
     ss_grid: list[SSGridCell] = []
     warnings: list[str] = []
     assumption_notes: list[dict[str, str]] = []  # label/value/source triples
+    legacy: Optional[LegacyResult] = None

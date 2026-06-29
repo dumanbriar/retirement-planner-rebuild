@@ -223,6 +223,16 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
         {"label": "Heir tax rate (terminal valuation)", "value": fpct(a.heir_tax_rate),
          "kind": "assumed", "source": "Discount on inherited tax-deferred/HSA dollars; "
                    "taxable assets assume basis step-up (IRC sec. 1014)."},
+        {"label": "Legacy / estate valuation", "value": "per-asset transfer character",
+         "kind": "modeled",
+         "source": "At death each asset passes by its transfer character: tax-free for "
+                   "Roth and life-insurance death benefits (IRC §101); basis step-up with "
+                   "no income tax for taxable/cash/shares/real estate (IRC §1014); income "
+                   "in respect of a decedent — heirs owe ordinary income tax at the heir "
+                   "rate — for tax-deferred/HSA and non-qualified annuity gains (IRC §691, "
+                   "§72). Charitable bequests pass tax-free out of the estate. NOTE: "
+                   "federal/state estate (transfer) tax — the lifetime exemption, "
+                   "portability, and state estate/inheritance tax — is NOT modeled."},
         {"label": "Return timing", "value": "annual, start-of-year flows",
          "kind": "modeled", "source": "Deterministic annual compounding; income recognized "
                    "on start-of-year balances. No return volatility (see sensitivity)."},
@@ -270,4 +280,5 @@ def build_plan(plan: PlanInput) -> PlanResult:
     return PlanResult(metrics=metrics, years=rows, sensitivity=sens,
                       conversion_comparison=comparisons, ss_grid=ss_grid,
                       warnings=sim.warnings,
-                      assumption_notes=assumption_notes(plan))
+                      assumption_notes=assumption_notes(plan),
+                      legacy=getattr(sim, "legacy", None))

@@ -27,8 +27,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ..models import (Account, AccountType, AccountYear, ConversionStrategy,
-                      Metrics, PlanInput, YearRow)
+from ..models import (Account, AccountType, AccountYear, Beneficiary,
+                      ConversionStrategy, LegacyAssetResult, LegacyResult,
+                      Metrics, PlanInput, TransferCharacter, YearRow)
 from . import constants as C
 from . import socialsecurity as ss
 from .taxes import (TaxYearInput, aca_subsidy, compute_taxes, irmaa_tier,
@@ -36,6 +37,17 @@ from .taxes import (TaxYearInput, aca_subsidy, compute_taxes, irmaa_tier,
 
 WATERFALL = [AccountType.cash, AccountType.taxable, AccountType.tax_deferred,
              AccountType.roth, AccountType.hsa]
+
+# How each account type passes to heirs at death (IRC §1014 step-up, §691 IRD,
+# or tax-free for Roth). Legacy assets added in later phases set their own
+# transfer_character on the AccountYear; accounts fall back to this map.
+ACCOUNT_TRANSFER_CHARACTER = {
+    AccountType.tax_deferred: TransferCharacter.ird,
+    AccountType.hsa: TransferCharacter.ird,
+    AccountType.taxable: TransferCharacter.step_up,
+    AccountType.cash: TransferCharacter.step_up,
+    AccountType.roth: TransferCharacter.tax_free,
+}
 
 BRACKET_TOP_INDEX = {
     ConversionStrategy.fill_10: 0,
@@ -402,6 +414,9 @@ class Simulator:
                 conversion_out=x.conv_out, conversion_in=x.conv_in,
                 growth=x.growth - x.drag, end_balance=x.balance,
                 cost_basis=x.basis if x.spec.type == AccountType.taxable else None,
+                asset_class="account",
+                transfer_character=ACCOUNT_TRANSFER_CHARACTER[x.spec.type].value,
+                beneficiary=Beneficiary.heirs.value,
             ) for x in self.accounts]
             row.total_assets = sum(x.balance for x in self.accounts)
             row.total_liabilities = sum(l["balance"] for l in self.liabilities
@@ -423,15 +438,8 @@ class Simulator:
             rows.append(row)
 
         last = rows[-1]
-        after_tax = 0.0
-        for x in last.accounts:
-            if x.type in (AccountType.tax_deferred, AccountType.hsa):
-                # heirs owe ordinary income tax on inherited TD/HSA dollars
-                after_tax += x.end_balance * (1 - self.a.heir_tax_rate)
-            else:
-                # taxable receives a basis step-up at death (IRC sec. 1014)
-                after_tax += x.end_balance
-        after_tax -= last.total_liabilities
+        after_tax, legacy = self.settle_estate(last)
+        self.legacy = legacy
 
         metrics = Metrics(
             nest_egg_at_retirement=nest_egg,
@@ -447,8 +455,76 @@ class Simulator:
             success=not depleted,
             chosen_conversion_strategy=self.strategy.value,
             ss_claim_ages=list(self.claim_ages),
+            gross_estate_real=(legacy.to_heirs_gross + legacy.to_charity)
+            / self.infl(last.year),
+            net_to_heirs_real=legacy.to_heirs_net / self.infl(last.year),
+            estate_ird_tax_real=legacy.ird_tax / self.infl(last.year),
+            to_charity_real=legacy.to_charity / self.infl(last.year),
+            gifts_made_total_real=legacy.gifts_lifetime / self.infl(last.year),
         )
         return rows, metrics
+
+    def settle_estate(self, last: YearRow) -> tuple[float, LegacyResult]:
+        """Value the estate at the end of the projection, dispatching on each
+        asset's transfer character and destination.
+
+        Returns (after_tax_to_heirs_nominal, LegacyResult). The first value
+        feeds ``ending_after_tax_real`` after deflation, and exactly reproduces
+        the previous terminal calc for ordinary accounts:
+          - ird (tax-deferred, HSA; later: annuity gain): heirs owe ordinary
+            income tax on the IRD portion -> balance * (1 - heir_rate)
+            (IRC §691; §72).
+          - step_up (taxable, cash; later: shares, real estate): basis reset at
+            death, no income tax (IRC §1014).
+          - tax_free (Roth; later: life-insurance death benefit): received
+            income-tax-free (IRC §408A; §101).
+        A charity destination passes tax-free OUT of the estate. Federal/state
+        estate (transfer) tax — exemption, portability — is intentionally NOT
+        modeled; see the assumption notes.
+        """
+        heir = self.a.heir_tax_rate
+        assets: list[LegacyAssetResult] = []
+        to_heirs_gross = to_heirs_net = to_charity = ird_tax = 0.0
+        for x in last.accounts:
+            char = x.transfer_character \
+                or ACCOUNT_TRANSFER_CHARACTER[x.type].value
+            dest = x.beneficiary or Beneficiary.heirs.value
+            gross = x.end_balance
+            if dest == Beneficiary.charity.value:
+                tax = 0.0
+                to_charity += gross
+            elif char == TransferCharacter.ird.value:
+                tax = gross * heir
+                to_heirs_gross += gross
+                to_heirs_net += gross - tax
+                ird_tax += tax
+            else:  # step_up or tax_free -> full value, no income tax to heirs
+                tax = 0.0
+                to_heirs_gross += gross
+                to_heirs_net += gross
+            assets.append(LegacyAssetResult(
+                name=x.name, asset_class=x.asset_class,
+                transfer_character=char, beneficiary=dest,
+                gross=gross, tax=tax, net=gross - tax))
+        # debts reduce what heirs ultimately receive
+        to_heirs_net -= last.total_liabilities
+        legacy = LegacyResult(
+            at_death_year=last.year, assets=assets,
+            to_heirs_gross=to_heirs_gross, to_heirs_net=to_heirs_net,
+            to_charity=to_charity, ird_tax=ird_tax,
+            gifts_lifetime=getattr(self, "gifts_lifetime", 0.0),
+            exemption_used=getattr(self, "exemption_used", 0.0))
+        return to_heirs_net, legacy
+
+    def annual_gifts(self, year: int) -> float:
+        """Lifetime gifts out of the portfolio this year (today's $ * inflation).
+        Phase-1 hook: returns 0 until Phase 8 (lifetime gifting) populates it."""
+        return 0.0
+
+    def qcd_total(self, year: int) -> float:
+        """Qualified charitable distributions from tax-deferred accounts this
+        year (IRC §408(d)(8)). Phase-1 hook: returns 0 until Phase 7."""
+        return 0.0
 
     # -------------------------------------------------------- accumulation yr
     def accumulation_year_step(self, year: int, status: str,
@@ -624,7 +700,8 @@ class Simulator:
                 scratch.roth_conversion = converted
 
             # 4) cover remaining need from the waterfall
-            need = spend_goal + debt_payments + home_purchase + healthcare_net + tax_guess
+            need = (spend_goal + debt_payments + home_purchase + healthcare_net
+                    + tax_guess + self.annual_gifts(year))
             resources = ss_total + other_taxable + other_nontaxable + rmd_total
             gap = need + scratch.penalties - resources
             if gap > 0:
@@ -661,7 +738,7 @@ class Simulator:
 
         # 6) any surplus income is reinvested
         need = (spend_goal + debt_payments + home_purchase + healthcare_net
-                + tax_guess + scratch.penalties)
+                + tax_guess + scratch.penalties + self.annual_gifts(year))
         resources = (ss_total + other_taxable + other_nontaxable + rmd_total
                      + sum(scratch.withdrawals_by_type.values()))
         surplus = max(0.0, resources - need - scratch.shortfall)
@@ -696,5 +773,7 @@ class Simulator:
             marginal_rate=tax_res.marginal_rate,
             effective_rate=(tax_res.total / tax_res.agi) if tax_res.agi > 0 else 0.0,
             flags=sorted(set(scratch.flags)),
+            gifts_made=self.annual_gifts(year),
+            qcd_amount=self.qcd_total(year),
         )
         return row, tax_guess

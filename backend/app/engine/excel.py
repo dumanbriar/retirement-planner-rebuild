@@ -7,7 +7,8 @@ Sheets:
   4. Retirement       - full cash-flow & tax detail for every retired year
   5. Account Detail   - start/contrib/withdraw/convert/growth/end per account-year
   6. Strategies       - Roth-conversion comparison + SS claiming grid
-  7. Sensitivity      - scenario table
+  7. Legacy & Estate  - what each asset passes to heirs vs charity, net of tax
+  8. Sensitivity      - scenario table
 """
 from __future__ import annotations
 
@@ -293,6 +294,48 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
                     xc.number_format = MONEY
             r += 1
     _autosize(ws, {1: 20, 2: 30, 3: 26, 4: 16})
+
+    # ------------------------------------------------------ Legacy / Estate
+    ws = wb.create_sheet("Legacy & Estate")
+    ws["A1"] = "Legacy / Estate — what each asset passes at death, net of tax (today's $)"
+    ws["A1"].font = TITLE_FONT
+    ws["A2"] = ("Transfer character: tax_free = income-tax-free to heirs "
+                "(Roth, life-insurance death benefit, IRC §101); step_up = basis "
+                "reset, no income tax (IRC §1014); ird = income in respect of a "
+                "decedent, heirs owe ordinary income tax (IRC §691/§72). "
+                "Estate (transfer) tax — exemption, portability, state estate tax — "
+                "is NOT modeled.")
+    ws["A2"].font = SUB_FONT
+    lg = result.legacy
+    if lg is not None:
+        _sheet_header(ws, 4, ["Asset", "Class", "Transfer character",
+                              "Beneficiary", "Gross (nominal)", "Heir tax",
+                              "Net (nominal)"])
+        r = 5
+        for a_ in lg.assets:
+            vals = [a_.name, a_.asset_class, a_.transfer_character, a_.beneficiary,
+                    a_.gross, a_.tax, a_.net]
+            for c, v in enumerate(vals, 1):
+                cell = ws.cell(row=r, column=c, value=v)
+                if isinstance(v, float):
+                    cell.number_format = MONEY
+            r += 1
+        r += 1
+        totals = [
+            ("To heirs — gross (nominal)", lg.to_heirs_gross),
+            ("To heirs — income tax on IRD (nominal)", lg.ird_tax),
+            ("To heirs — net of tax & liabilities (nominal)", lg.to_heirs_net),
+            ("To charity (nominal)", lg.to_charity),
+            ("Net to heirs (today's $)", m.net_to_heirs_real),
+            ("To charity (today's $)", m.to_charity_real),
+            ("Lifetime gifts (today's $)", m.gifts_made_total_real),
+        ]
+        for label, val in totals:
+            ws.cell(row=r, column=1, value=label).font = Font(bold=True)
+            cell = ws.cell(row=r, column=5, value=val)
+            cell.number_format = MONEY
+            r += 1
+    _autosize(ws, {1: 30, 2: 12, 3: 18, 4: 12, 5: 16, 6: 14, 7: 16})
 
     # --------------------------------------------------------- Sensitivity
     ws = wb.create_sheet("Sensitivity")

@@ -78,6 +78,17 @@ export interface IncomeStream {
   taxable: boolean; // taxed as ordinary income
 }
 
+/** How an asset is taxed when it passes to its beneficiary at death. */
+export type TransferCharacter = "tax_free" | "step_up" | "ird";
+
+export const TRANSFER_CHARACTER_LABELS: Record<TransferCharacter, string> = {
+  tax_free: "Income-tax-free",
+  step_up: "Stepped-up basis",
+  ird: "Taxable to heirs (IRD)",
+};
+
+export type Beneficiary = "heirs" | "charity";
+
 export type ConversionStrategy =
   | "none"
   | "fill_10"
@@ -144,6 +155,13 @@ export interface AccountYear {
   growth: number;
   end_balance: number;
   cost_basis: number | null; // taxable accounts
+  // legacy-asset flows (default 0 / "account" for ordinary accounts)
+  premium?: number;
+  distribution?: number;
+  death_benefit_paid?: number;
+  asset_class?: string; // account | insurance | annuity | private | realestate
+  transfer_character?: TransferCharacter | null;
+  beneficiary?: Beneficiary | string;
 }
 
 export interface YearRow {
@@ -169,6 +187,11 @@ export interface YearRow {
   roth_conversion: number;
   surplus_reinvested: number;
   shortfall: number; // unmet spending (plan failure)
+  premiums_paid?: number;
+  legacy_distributions?: number;
+  death_benefits_paid?: number;
+  qcd_amount?: number;
+  gifts_made?: number;
 
   // tax detail (nominal $)
   dividends: number;
@@ -210,6 +233,12 @@ export interface Metrics {
   success: boolean;
   chosen_conversion_strategy: string;
   ss_claim_ages: number[];
+  // legacy / estate (today's dollars); estate transfer tax is NOT modeled
+  gross_estate_real?: number;
+  net_to_heirs_real?: number;
+  estate_ird_tax_real?: number;
+  to_charity_real?: number;
+  gifts_made_total_real?: number;
 }
 
 export interface SensitivityRow {
@@ -259,6 +288,27 @@ export interface ConstantsFreshness {
   stale: boolean;
 }
 
+export interface LegacyAssetResult {
+  name: string;
+  asset_class: string;
+  transfer_character: TransferCharacter | string;
+  beneficiary: Beneficiary | string;
+  gross: number;
+  tax: number;
+  net: number;
+}
+
+export interface LegacyResult {
+  at_death_year: number;
+  assets: LegacyAssetResult[];
+  to_heirs_gross: number;
+  to_heirs_net: number;
+  to_charity: number;
+  ird_tax: number;
+  gifts_lifetime: number;
+  exemption_used: number;
+}
+
 export interface PlanResult {
   metrics: Metrics;
   years: YearRow[];
@@ -267,6 +317,7 @@ export interface PlanResult {
   ss_grid: SSGridCell[];
   warnings: string[];
   assumption_notes: AssumptionNote[];
+  legacy?: LegacyResult | null;
 }
 
 export type DisplayMode = "real" | "nominal";

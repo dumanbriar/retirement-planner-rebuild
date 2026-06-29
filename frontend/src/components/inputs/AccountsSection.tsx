@@ -10,6 +10,7 @@ import {
   TextField,
 } from "../ui/fields";
 import { removeAt, type SectionProps, updateAt } from "./sectionProps";
+import { ModelingDisclosure } from "./ModelingDisclosure";
 
 const TYPE_OPTIONS = (Object.keys(ACCOUNT_TYPE_LABELS) as AccountType[]).map((t) => ({
   value: t,
@@ -121,6 +122,7 @@ export function AccountsSection({ input, onChange, errors, dense }: SectionProps
                 </button>
               </div>
             </div>
+            <ModelingDisclosure assetKey={a.type} className="mt-3" />
           </div>
         );
       })}
