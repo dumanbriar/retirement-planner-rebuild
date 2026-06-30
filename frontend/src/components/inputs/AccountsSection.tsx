@@ -58,15 +58,17 @@ export function AccountsSection({ input, onChange, errors, dense }: SectionProps
                 error={e("name")}
                 className={dense ? "col-span-2" : "col-span-2 lg:col-span-3"}
               />
-              <SelectField
-                label="Type"
-                value={a.type}
-                onChange={(t) => setType(i, t)}
-                options={TYPE_OPTIONS}
-                error={e("type")}
-                className={dense ? "" : "lg:col-span-3"}
-                help="Drives tax treatment: tax-deferred is taxed as ordinary income on withdrawal (with RMDs); Roth withdrawals are tax-free; taxable pays dividend/capital-gains tax; HSA is tax-free for medical; cash interest is taxed annually."
-              />
+              <div className={dense ? "" : "lg:col-span-3"}>
+                <SelectField
+                  label="Type"
+                  value={a.type}
+                  onChange={(t) => setType(i, t)}
+                  options={TYPE_OPTIONS}
+                  error={e("type")}
+                  help="Drives tax treatment: tax-deferred is taxed as ordinary income on withdrawal (with RMDs); Roth withdrawals are tax-free; taxable pays dividend/capital-gains tax; HSA is tax-free for medical; cash interest is taxed annually."
+                />
+                <ModelingDisclosure assetKey={a.type} className="mt-1.5" />
+              </div>
               {(a.type === "tax_deferred" || a.type === "roth") && (
                 <SelectField
                   label="Vehicle"
@@ -141,7 +143,6 @@ export function AccountsSection({ input, onChange, errors, dense }: SectionProps
                 </button>
               </div>
             </div>
-            <ModelingDisclosure assetKey={a.type} className="mt-3" />
           </div>
         );
       })}
