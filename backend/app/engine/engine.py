@@ -28,7 +28,7 @@ from __future__ import annotations
 from typing import Optional
 
 from ..models import (Account, AccountType, AccountVehicle, AccountYear,
-                      Beneficiary, ConversionStrategy, InsurancePolicy,
+                      Annuity, Beneficiary, ConversionStrategy, InsurancePolicy,
                       LegacyAssetResult, LegacyResult, Metrics, PlanInput,
                       TransferCharacter, YearRow)
 from . import constants as C
@@ -98,6 +98,30 @@ class SimInsurance:
         return self.spec.cash_value_return
 
 
+class SimAnnuity:
+    """Internal state for a non-qualified deferred annuity. Accumulates tax-
+    deferred, then pays a level period-certain stream from annuitize_at_age.
+    Never in the withdrawal waterfall; its balance counts in net worth."""
+    def __init__(self, spec: Annuity):
+        self.spec = spec
+        self.owner = spec.owner
+        self.balance = spec.balance
+        self.basis = spec.basis            # remaining un-recovered basis
+        self.active = True
+        self.annuitized = False
+        self.payment = 0.0                 # level annual payout once annuitized
+        self.excluded = 0.0                # basis returned tax-free per payout year
+        self.payout_left = 0
+        # per-year reporting scratch
+        self.start_balance = spec.balance
+        self.growth = 0.0
+        self.payout = 0.0
+
+    @property
+    def rate(self) -> float:
+        return self.spec.accumulation_return
+
+
 class YearScratch:
     def __init__(self):
         self.withdrawals_by_type: dict[str, float] = {}
@@ -134,10 +158,13 @@ class Simulator:
         self.warnings: list[str] = []
 
         self.policies = [SimInsurance(p) for p in plan.insurance_policies]
-        # per-year insurance scratch (set by prepare_insurance each year)
+        self.annuities = [SimAnnuity(a) for a in plan.annuities]
+        # per-year insurance/annuity scratch (set each year before the phase step)
         self._ins_premium = 0.0
         self._ins_surrender_gain = 0.0
         self._death_benefit_paid_year = 0.0
+        self._annuity_payout = 0.0       # total annuity payments this year (cash)
+        self._annuity_taxable = 0.0      # ordinary (gain) portion of those payments
 
         self.accounts = [SimAccount(s) for s in plan.accounts]
         if not any(x.spec.type in (AccountType.taxable, AccountType.cash)
@@ -397,6 +424,11 @@ class Simulator:
                         for acct in self.accounts:
                             if acct.owner == i:
                                 acct.owner = 1 - i
+                        # non-qualified annuity: a surviving spouse continues it
+                        # (spousal continuation); the schedule keys off their age.
+                        for an in self.annuities:
+                            if an.owner == i:
+                                an.owner = 1 - i
                         # life insurance: the death benefit is paid (income-tax-
                         # free, IRC §101) into the surviving spouse's portfolio.
                         for p in self.policies:
@@ -421,6 +453,7 @@ class Simulator:
             status = self.filing_status(year)
             self.update_ss_levels(year)
             self.prepare_insurance(year)
+            self.prepare_annuities(year)
             dividends, interest = self.start_of_year_income()
 
             # a future home purchase activates here: the mortgage appears and a
@@ -458,6 +491,19 @@ class Simulator:
                 row.total_tax += t
                 tgt = self.surplus_account()
                 tgt.balance -= t
+
+            # an annuity that annuitizes before household retirement: the payout
+            # is reinvested net of the flat pre-retirement tax on its gain portion.
+            if not retired and self._annuity_payout > 0:
+                t = self._annuity_taxable * self.a.pre_retirement_tax_rate
+                net = self._annuity_payout - t
+                row.total_tax += t
+                row.legacy_distributions += self._annuity_payout
+                tgt = self.surplus_account()
+                tgt.balance += net
+                tgt.contribution += net
+                if tgt.spec.type == AccountType.taxable:
+                    tgt.basis += net
 
             if not retired:
                 # annual drag, paid from the accounts (shown net in growth)
@@ -509,10 +555,23 @@ class Simulator:
                 transfer_character=TransferCharacter.tax_free.value,
                 beneficiary=Beneficiary.heirs.value,
             ) for p in self.policies if p.active]
+            # deferred annuities (accumulation value, or remaining payout value)
+            row.accounts += [AccountYear(
+                name=a.spec.name, type=None, owner=a.owner,
+                start_balance=a.start_balance, contribution=0.0,
+                withdrawal=0.0, distribution=a.payout, growth=a.growth,
+                end_balance=a.balance, cost_basis=a.basis,
+                asset_class="annuity",
+                transfer_character=TransferCharacter.ird.value,
+                beneficiary=Beneficiary.heirs.value,
+            ) for a in self.annuities if a.active or a.payout > 0]
             row.premiums_paid = self._ins_premium if retired else 0.0
             row.death_benefits_paid = self._death_benefit_paid_year
+            if retired:
+                row.legacy_distributions += self._annuity_payout
             row.total_assets = (sum(x.balance for x in self.accounts)
-                                + sum(p.cash_value for p in self.policies if p.active))
+                                + sum(p.cash_value for p in self.policies if p.active)
+                                + sum(a.balance for a in self.annuities if a.active))
             row.total_liabilities = sum(l["balance"] for l in self.liabilities
                                         if self._liab_active(l, year))
             row.net_worth = row.total_assets - row.total_liabilities
@@ -586,11 +645,16 @@ class Simulator:
             # a life policy still in force at the end pays its death benefit
             # (income-tax-free, IRC §101); its cash value is subsumed.
             gross = x.death_benefit if x.asset_class == "insurance" else x.end_balance
+            # IRD is taxed on the full balance for tax-deferred/HSA, but only on
+            # the GAIN above remaining basis for a non-qualified annuity (§72).
+            ird_base = gross
+            if x.asset_class == "annuity":
+                ird_base = max(0.0, gross - (x.cost_basis or 0.0))
             if dest == Beneficiary.charity.value:
                 tax = 0.0
                 to_charity += gross
             elif char == TransferCharacter.ird.value:
-                tax = gross * heir
+                tax = ird_base * heir
                 to_heirs_gross += gross
                 to_heirs_net += gross - tax
                 ird_tax += tax
@@ -652,6 +716,49 @@ class Simulator:
             if p.spec.paid_up_age is None or age < p.spec.paid_up_age:
                 p.basis += p.spec.annual_premium
                 self._ins_premium += p.spec.annual_premium
+
+    def prepare_annuities(self, year: int) -> None:
+        """Process deferred annuities for the year, BEFORE the phase step so the
+        payout is available as income. Tax-deferred growth while accumulating;
+        from annuitize_at_age a level period-certain payout, each payment split
+        by the exclusion ratio (basis/balance at annuitization): excluded =
+        basis/payout_years is tax-free, the rest is ordinary income (IRC §72(b)).
+        Sets self._annuity_payout (cash) and self._annuity_taxable (ordinary)."""
+        self._annuity_payout = 0.0
+        self._annuity_taxable = 0.0
+        for a in self.annuities:
+            a.start_balance = a.balance
+            a.growth = 0.0
+            a.payout = 0.0
+            if not a.active or not self.alive(a.owner, year):
+                continue
+            age = self.age(a.owner, year)
+            if not a.annuitized:
+                # accumulate tax-deferred
+                a.growth = a.balance * a.rate
+                a.balance += a.growth
+                if age >= a.spec.annuitize_at_age:
+                    n = a.spec.payout_years
+                    a.payment = a.balance / n        # level period-certain payout
+                    a.excluded = a.basis / n         # exclusion ratio = basis/balance
+                    a.payout_left = n
+                    a.annuitized = True
+                else:
+                    continue  # still accumulating
+            # annuitized (possibly as of this year): pay the level amount
+            if a.payout_left > 0:
+                pay = min(a.payment, a.balance)
+                a.balance -= pay
+                taxable = max(0.0, pay - a.excluded)
+                a.basis = max(0.0, a.basis - a.excluded)
+                a.payout = pay
+                self._annuity_payout += pay
+                self._annuity_taxable += taxable
+                a.payout_left -= 1
+                if a.payout_left <= 0:
+                    a.balance = 0.0
+                    a.basis = 0.0
+                    a.active = False
 
     # -------------------------------------------------------- accumulation yr
     def accumulation_year_step(self, year: int, status: str,
@@ -958,18 +1065,20 @@ class Simulator:
             # 4) cover remaining need from the waterfall
             need = (spend_goal + debt_payments + home_purchase + healthcare_net
                     + tax_guess + self.annual_gifts(year) + self._ins_premium)
-            resources = ss_total + other_taxable + other_nontaxable + rmd_total
+            resources = (ss_total + other_taxable + other_nontaxable + rmd_total
+                         + self._annuity_payout)
             gap = need + scratch.penalties - resources
             if gap > 0:
                 got = self.waterfall_withdraw(gap, scratch, year)
                 scratch.shortfall = max(0.0, gap - got)
 
-            # 5) taxes on the resulting income picture (a policy surrender adds
-            # ordinary income on the cash value above total premiums, IRC §72(e))
+            # 5) taxes on the resulting income picture. A policy surrender adds
+            # ordinary income (cash value over premiums, §72(e)); an annuity
+            # payout's gain portion is ordinary via the exclusion ratio (§72(b)).
             td_withdrawn = scratch.withdrawals_by_type.get("tax_deferred", 0.0)
             ordinary = (td_withdrawn + scratch.roth_conversion
                         + scratch.hsa_nonmedical + other_taxable + interest
-                        + self._ins_surrender_gain)
+                        + self._ins_surrender_gain + self._annuity_taxable)
             tax_res = compute_taxes(TaxYearInput(
                 year=year, filing_status=status, inflation=a.inflation,
                 ordinary_income=ordinary, ss_benefits=ss_total,
@@ -1002,6 +1111,7 @@ class Simulator:
                 + tax_guess + scratch.penalties + self.annual_gifts(year)
                 + self._ins_premium)
         resources = (ss_total + other_taxable + other_nontaxable
+                     + self._annuity_payout
                      + sum(scratch.withdrawals_by_type.values()))
         surplus = max(0.0, resources - need - scratch.shortfall)
         if surplus > 0.005 and scratch.shortfall <= 1:

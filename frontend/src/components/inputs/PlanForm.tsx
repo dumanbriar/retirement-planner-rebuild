@@ -7,6 +7,7 @@ import { AccountsSection } from "./AccountsSection";
 import { LiabilitiesSection } from "./LiabilitiesSection";
 import { IncomeStreamsSection } from "./IncomeStreamsSection";
 import { InsuranceSection } from "./InsuranceSection";
+import { AnnuitiesSection } from "./AnnuitiesSection";
 import { SpendingSection } from "./SpendingSection";
 import { AssumptionsSection } from "./AssumptionsSection";
 import { PlanIO } from "./PlanIO";
@@ -87,6 +88,13 @@ export function PlanForm({
           help="Whole/permanent policies with cash value and a death benefit. The death benefit passes income-tax-free to heirs (IRC §101); cash value grows tax-deferred. Amounts are level nominal figures, not today's dollars."
         >
           <InsuranceSection {...sectionProps} />
+        </Card>
+
+        <Card
+          title="Annuities"
+          help="Non-qualified deferred annuities: tax-deferred growth, then a level payout split by the exclusion ratio (basis tax-free, gain ordinary). At death the remaining gain is taxable to heirs (IRD)."
+        >
+          <AnnuitiesSection {...sectionProps} />
         </Card>
 
         <Card

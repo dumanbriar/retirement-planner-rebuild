@@ -64,6 +64,17 @@ export const MODELING_DISCLOSURES: Record<string, ModelingSpec> = {
       "Policy loans, dividends / paid-up additions, MEC rules, variable/indexed crediting",
     ],
   },
+  annuity: {
+    modeled: [
+      "Tax-deferred accumulation at the assumed rate",
+      "Level period-certain payout from the annuitization age",
+      "Exclusion ratio: basis tax-free, gain ordinary income (IRC §72(b))",
+      "At death the remaining gain is taxable to heirs (IRD, no step-up, §691/§72)",
+    ],
+    notModeled: [
+      "Variable/indexed subaccounts, GLWB income riders, lifetime (mortality-based) payout",
+    ],
+  },
 };
 
 export function modelingSpec(key: string): ModelingSpec | undefined {

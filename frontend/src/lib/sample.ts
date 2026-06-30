@@ -1,5 +1,6 @@
 import type {
   Account,
+  Annuity,
   Assumptions,
   IncomeStream,
   InsurancePolicy,
@@ -113,6 +114,7 @@ export const SAMPLE_INPUT: PlanInput = {
   ],
   income_streams: [],
   insurance_policies: [],
+  annuities: [],
   annual_spending: 96_000,
   assumptions: {
     ...DEFAULT_ASSUMPTIONS,
@@ -182,5 +184,17 @@ export function newInsurancePolicy(): InsurancePolicy {
     death_benefit: 0,
     premiums_paid_to_date: 0,
     surrender_at_age: null,
+  };
+}
+
+export function newAnnuity(): Annuity {
+  return {
+    name: "Deferred annuity",
+    owner: 0,
+    balance: 0,
+    basis: 0,
+    accumulation_return: 0.04,
+    annuitize_at_age: 70,
+    payout_years: 20,
   };
 }

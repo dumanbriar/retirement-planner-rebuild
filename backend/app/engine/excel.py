@@ -152,6 +152,13 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
             f"@ {ip.cash_value_return * 100:.2f}%; premium {ip.annual_premium:,.0f}/yr"
             f"{paid_up}{surr} (level nominal)",
             "assumed", "User input"))
+    for an in plan.annuities:
+        user_inputs.append((
+            f"Annuity: {an.name} ({persons[an.owner].name})",
+            f"value {an.balance:,.0f}; basis {an.basis:,.0f}; "
+            f"grow {an.accumulation_return * 100:.2f}%; annuitize at {an.annuitize_at_age} "
+            f"over {an.payout_years} yrs (period-certain)",
+            "assumed", "User input"))
     for label, val, kind, src in user_inputs:
         ws.cell(row=r, column=1, value=label)
         ws.cell(row=r, column=2, value=val)

@@ -147,6 +147,20 @@ class InsurancePolicy(BaseModel):
     surrender_at_age: Optional[int] = Field(default=None, ge=30, le=110)  # optional lapse
 
 
+class Annuity(BaseModel):
+    """Non-qualified deferred annuity. Tax-deferred accumulation, then a fixed
+    period-certain payout beginning at annuitize_at_age. Each payout is split by
+    the exclusion ratio (basis returned tax-free, the gain ordinary, IRC §72(b)).
+    Amounts are nominal. At death the remaining gain is IRD (no step-up, §691)."""
+    name: str = "Deferred annuity"
+    owner: int = Field(default=0, ge=0, le=1)
+    balance: float = Field(ge=0)                 # current accumulation value, nominal
+    basis: float = Field(default=0, ge=0)        # after-tax premiums paid (exclusion basis)
+    accumulation_return: float = Field(default=0.04, ge=-0.10, le=0.20)  # assumed
+    annuitize_at_age: int = Field(ge=50, le=90)
+    payout_years: int = Field(default=20, ge=1, le=40)  # period-certain payout length
+
+
 class ConversionStrategy(str, Enum):
     none = "none"
     fill_10 = "fill_10"
@@ -194,6 +208,7 @@ class PlanInput(BaseModel):
     liabilities: list[Liability] = Field(default_factory=list, max_length=20)
     income_streams: list[IncomeStream] = Field(default_factory=list, max_length=20)
     insurance_policies: list[InsurancePolicy] = Field(default_factory=list, max_length=20)
+    annuities: list[Annuity] = Field(default_factory=list, max_length=20)
     annual_spending: float = Field(gt=0)  # retirement spend goal, today's $
     assumptions: Assumptions = Field(default_factory=Assumptions)
 
@@ -209,6 +224,9 @@ class PlanInput(BaseModel):
         for p in self.insurance_policies:
             if p.owner >= n:
                 raise ValueError(f"Insurance policy '{p.name}' owner index out of range")
+        for an in self.annuities:
+            if an.owner >= n:
+                raise ValueError(f"Annuity '{an.name}' owner index out of range")
         return self
 
 

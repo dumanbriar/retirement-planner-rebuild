@@ -110,6 +110,17 @@ export interface InsurancePolicy {
   surrender_at_age: number | null; // optional lapse
 }
 
+/** Non-qualified deferred annuity: tax-deferred accumulation then a period-certain payout. */
+export interface Annuity {
+  name: string;
+  owner: number;
+  balance: number; // accumulation value, nominal
+  basis: number; // after-tax premiums paid (exclusion-ratio basis)
+  accumulation_return: number; // assumed growth rate
+  annuitize_at_age: number; // 50..90
+  payout_years: number; // 1..40
+}
+
 /** How an asset is taxed when it passes to its beneficiary at death. */
 export type TransferCharacter = "tax_free" | "step_up" | "ird";
 
@@ -171,6 +182,7 @@ export interface PlanInput {
   liabilities: Liability[];
   income_streams: IncomeStream[];
   insurance_policies: InsurancePolicy[];
+  annuities: Annuity[];
   annual_spending: number; // retirement spend goal, today's $
   assumptions: Assumptions;
 }

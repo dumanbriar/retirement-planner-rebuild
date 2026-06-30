@@ -81,6 +81,20 @@ export function validatePlanInput(input: PlanInput): FieldErrors {
     if (p.owner >= input.persons.length) errors[k("owner")] = "Owner is out of range.";
   });
 
+  (input.annuities ?? []).forEach((a, i) => {
+    const k = (f: string) => `annuities.${i}.${f}`;
+    if (!a.name.trim()) errors[k("name")] = "Name is required.";
+    if (!(a.balance >= 0)) errors[k("balance")] = "Must be ≥ 0.";
+    if (!(a.basis >= 0)) errors[k("basis")] = "Must be ≥ 0.";
+    if (!inRange(a.accumulation_return, -0.1, 0.2))
+      errors[k("accumulation_return")] = "Return must be −10% to 20%.";
+    if (!inRange(a.annuitize_at_age, 50, 90))
+      errors[k("annuitize_at_age")] = "Annuitize age must be 50–90.";
+    if (!inRange(a.payout_years, 1, 40))
+      errors[k("payout_years")] = "Payout years must be 1–40.";
+    if (a.owner >= input.persons.length) errors[k("owner")] = "Owner is out of range.";
+  });
+
   if (!(input.annual_spending > 0))
     errors["annual_spending"] = "Annual retirement spending must be greater than 0.";
 

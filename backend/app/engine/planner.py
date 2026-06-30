@@ -419,6 +419,19 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
                       "from the portfolio in retirement (assumed wage-covered before). NOT "
                       "modeled: policy loans, dividends/paid-up additions, MEC rules, "
                       "variable/indexed crediting."})
+    if plan.annuities:
+        notes.append({
+            "label": "Deferred annuity (non-qualified)", "value": "exclusion-ratio payout",
+            "kind": "modeled",
+            "source": "Tax-deferred accumulation; a level period-certain payout from the "
+                      "annuitization age over the chosen number of years. Each payment is "
+                      "split by the exclusion ratio (basis / value at annuitization): the "
+                      "basis portion is tax-free, the rest is ordinary income (IRC §72(b)). "
+                      "At death the remaining gain is income in respect of a decedent — no "
+                      "basis step-up; heirs owe ordinary income on the gain only (IRC §691, "
+                      "§72). A surviving spouse continues the contract. NOT modeled: "
+                      "variable/indexed subaccounts, GLWB/income riders, lifetime "
+                      "(mortality-based) annuitization."})
     if any(getattr(s, "survivor_pct", 0) > 0 for s in plan.income_streams):
         notes.append({
             "label": "Pension/annuity survivor benefit", "value": "continues at set %",

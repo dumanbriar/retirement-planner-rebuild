@@ -5,6 +5,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Coins,
   CreditCard,
   Landmark,
   Loader2,
@@ -25,6 +26,7 @@ import { AccountsSection } from "./AccountsSection";
 import { LiabilitiesSection } from "./LiabilitiesSection";
 import { IncomeStreamsSection } from "./IncomeStreamsSection";
 import { InsuranceSection } from "./InsuranceSection";
+import { AnnuitiesSection } from "./AnnuitiesSection";
 import { SpendingSection } from "./SpendingSection";
 import { AssumptionsSection } from "./AssumptionsSection";
 import { PlanIO } from "./PlanIO";
@@ -205,6 +207,19 @@ export function Sidebar({
           }
         >
           <InsuranceSection {...sectionProps} />
+        </SectionAccordion>
+
+        <SectionAccordion
+          icon={Coins}
+          title="Annuities"
+          hasError={hasErr("annuities.")}
+          summary={
+            input.annuities.length === 0
+              ? "None"
+              : input.annuities.map((a) => `${a.name} ${fmtCurrency(a.balance)}`).join(" · ")
+          }
+        >
+          <AnnuitiesSection {...sectionProps} />
         </SectionAccordion>
 
         <SectionAccordion

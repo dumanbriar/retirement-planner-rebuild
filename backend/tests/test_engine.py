@@ -15,9 +15,9 @@ from app.engine.taxes import (TaxYearInput, aca_applicable_pct, aca_subsidy,
                               compute_taxes, irmaa_tier,
                               taxable_social_security)
 from app.engine.planner import SPLIT_LEVELS, apply_split
-from app.models import (Account, AccountType, AccountVehicle, Assumptions,
-                        ConversionStrategy, IncomeStream, InsurancePolicy,
-                        Liability, Person, PlanInput)
+from app.models import (Account, AccountType, AccountVehicle, Annuity,
+                        Assumptions, ConversionStrategy, IncomeStream,
+                        InsurancePolicy, Liability, Person, PlanInput)
 
 
 # ----------------------------------------------------------- federal tax
@@ -662,6 +662,60 @@ def test_insurance_death_benefit_in_estate_income_tax_free():
     assert math.isclose(ins.gross, 500_000, abs_tol=1)  # death benefit, not cash value
     assert ins.tax == 0                                  # income-tax-free (IRC §101)
     assert ins.transfer_character == "tax_free"
+
+
+# --------------------------------------------- deferred annuity (Phase 4)
+def _solo_with_annuity(annuity: Annuity, **kw) -> PlanInput:
+    return PlanInput(
+        persons=[Person(name="Pat", current_age=60, retirement_age=62, death_age=85,
+                        ss_monthly_at_fra=2500, ss_claim_age=67)],
+        accounts=[Account(name="401k", type=AccountType.tax_deferred, owner=0,
+                          balance=900_000, annual_contribution=0, expected_return=0.05)],
+        annuities=[annuity],
+        annual_spending=55_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none),
+        **kw)
+
+
+def test_annuity_exclusion_ratio_splits_payout():
+    # basis 100k / balance 200k over 20 yrs -> $10k/yr payout, 50% excluded.
+    ann = Annuity(name="SPDA", owner=0, balance=200_000, basis=100_000,
+                  accumulation_return=0.0, annuitize_at_age=70, payout_years=20)
+    sim = Simulator(_solo_with_annuity(ann), strategy=ConversionStrategy.none)
+    sim.prepare_annuities(2036)  # Pat (born 1966) is 70 in 2036
+    assert math.isclose(sim._annuity_payout, 10_000, abs_tol=1)
+    assert math.isclose(sim._annuity_taxable, 5_000, abs_tol=1)   # gain portion
+    a = sim.annuities[0]
+    assert a.annuitized
+    assert math.isclose(a.balance, 190_000, abs_tol=1)
+    assert math.isclose(a.basis, 95_000, abs_tol=1)
+
+
+def test_annuity_ird_taxes_gain_only_at_death():
+    # held to death without annuitizing: heirs owe IRD on the GAIN only (§691/§72),
+    # basis returns tax-free. 150k value, 90k basis, 24% heir rate -> 14,400.
+    ann = Annuity(name="SPDA", owner=0, balance=150_000, basis=90_000,
+                  accumulation_return=0.0, annuitize_at_age=90, payout_years=10)
+    result = build_plan(_solo_with_annuity(ann))
+    a = next(x for x in result.legacy.assets if x.asset_class == "annuity")
+    assert math.isclose(a.gross, 150_000, abs_tol=1)
+    assert math.isclose(a.tax, 60_000 * 0.24, abs_tol=1)
+    assert a.transfer_character == "ird"
+
+
+def test_annuity_payout_exhausts_balance_over_term():
+    # a 5-year payout from age 63 fully amortizes the balance to zero.
+    ann = Annuity(name="SPDA", owner=0, balance=100_000, basis=100_000,
+                  accumulation_return=0.0, annuitize_at_age=63, payout_years=5)
+    rows = Simulator(_solo_with_annuity(ann), strategy=ConversionStrategy.none).run()[0]
+    by = {y.year: y for y in rows}
+    # Pat is 63 in 2029; payouts 2029-2033, each $20k, then exhausted.
+    pay_years = [y for y in rows if y.legacy_distributions > 0]
+    assert len(pay_years) == 5
+    for y in pay_years:
+        assert math.isclose(y.legacy_distributions, 20_000, abs_tol=1)
+    ann_rows = [a for a in by[2034].accounts if a.asset_class == "annuity"]
+    assert all(a.end_balance < 1 for a in ann_rows)  # exhausted after the term
 
 
 def test_insurance_surrender_realizes_ordinary_gain():
