@@ -94,6 +94,22 @@ export interface IncomeStream {
   survivor_pct?: number;
 }
 
+/**
+ * Whole / permanent life insurance with cash value. Amounts are LEVEL NOMINAL
+ * figures (the policy's actual contractual values), NOT today's dollars.
+ */
+export interface InsurancePolicy {
+  name: string;
+  owner: number;
+  annual_premium: number; // level nominal $/yr
+  paid_up_age: number | null; // premiums stop at this age (null => for life)
+  cash_value: number; // current surrender value, nominal
+  cash_value_return: number; // assumed growth rate
+  death_benefit: number; // face amount, level nominal
+  premiums_paid_to_date: number; // basis for surrender gain
+  surrender_at_age: number | null; // optional lapse
+}
+
 /** How an asset is taxed when it passes to its beneficiary at death. */
 export type TransferCharacter = "tax_free" | "step_up" | "ird";
 
@@ -154,6 +170,7 @@ export interface PlanInput {
   accounts: Account[]; // >= 1
   liabilities: Liability[];
   income_streams: IncomeStream[];
+  insurance_policies: InsurancePolicy[];
   annual_spending: number; // retirement spend goal, today's $
   assumptions: Assumptions;
 }
@@ -163,7 +180,7 @@ export interface PlanInput {
 /** One account's audit trail for one year. */
 export interface AccountYear {
   name: string;
-  type: AccountType;
+  type: AccountType | null; // null for legacy assets (see asset_class)
   owner: number;
   start_balance: number;
   contribution: number;
@@ -177,6 +194,7 @@ export interface AccountYear {
   premium?: number;
   distribution?: number;
   death_benefit_paid?: number;
+  death_benefit?: number; // standing face amount (insurance terminal value)
   asset_class?: string; // account | insurance | annuity | private | realestate
   transfer_character?: TransferCharacter | null;
   beneficiary?: Beneficiary | string;

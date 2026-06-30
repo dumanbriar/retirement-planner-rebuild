@@ -143,6 +143,15 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
                             f"{' +COLA' if s.cola else ''}{'' if s.taxable else ' (non-taxable)'}"
                             f"{survivor}",
                             "assumed", "User input"))
+    for ip in plan.insurance_policies:
+        paid_up = f"; paid up at {ip.paid_up_age}" if ip.paid_up_age else ""
+        surr = f"; surrender at {ip.surrender_at_age}" if ip.surrender_at_age else ""
+        user_inputs.append((
+            f"Insurance: {ip.name} ({persons[ip.owner].name})",
+            f"death benefit {ip.death_benefit:,.0f}; cash value {ip.cash_value:,.0f} "
+            f"@ {ip.cash_value_return * 100:.2f}%; premium {ip.annual_premium:,.0f}/yr"
+            f"{paid_up}{surr} (level nominal)",
+            "assumed", "User input"))
     for label, val, kind, src in user_inputs:
         ws.cell(row=r, column=1, value=label)
         ws.cell(row=r, column=2, value=val)
@@ -207,7 +216,8 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
         if y.phase != "retirement":
             continue
         wbt = y.withdrawals_by_type
-        hsa_wd = sum(ac.withdrawal for ac in y.accounts if ac.type.value == "hsa")
+        hsa_wd = sum(ac.withdrawal for ac in y.accounts
+                     if getattr(ac.type, "value", None) == "hsa")
         contrib = sum(ac.contribution for ac in y.accounts) - y.surplus_reinvested
         growth = sum(ac.growth for ac in y.accounts)
         vals = ([y.year] + [y.ages[i] if i < len(y.ages) else None
@@ -251,7 +261,8 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
     r = 4
     for y in result.years:
         for ac in y.accounts:
-            vals = [y.year, y.phase, ac.name, ac.type.value,
+            vals = [y.year, y.phase, ac.name,
+                    ac.type.value if ac.type else ac.asset_class,
                     persons[ac.owner].name if ac.owner < len(persons) else "",
                     ac.start_balance, ac.contribution, ac.withdrawal,
                     ac.conversion_out, ac.conversion_in, ac.growth,

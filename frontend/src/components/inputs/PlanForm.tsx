@@ -6,6 +6,7 @@ import { HouseholdSection } from "./HouseholdSection";
 import { AccountsSection } from "./AccountsSection";
 import { LiabilitiesSection } from "./LiabilitiesSection";
 import { IncomeStreamsSection } from "./IncomeStreamsSection";
+import { InsuranceSection } from "./InsuranceSection";
 import { SpendingSection } from "./SpendingSection";
 import { AssumptionsSection } from "./AssumptionsSection";
 import { PlanIO } from "./PlanIO";
@@ -79,6 +80,13 @@ export function PlanForm({
           help="Pensions, annuities, rentals, or part-time work. Amounts are in today's dollars and can be COLA-adjusted and taxable or tax-free."
         >
           <IncomeStreamsSection {...sectionProps} />
+        </Card>
+
+        <Card
+          title="Life insurance"
+          help="Whole/permanent policies with cash value and a death benefit. The death benefit passes income-tax-free to heirs (IRC §101); cash value grows tax-deferred. Amounts are level nominal figures, not today's dollars."
+        >
+          <InsuranceSection {...sectionProps} />
         </Card>
 
         <Card

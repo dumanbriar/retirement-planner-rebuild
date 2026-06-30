@@ -28,9 +28,9 @@ from __future__ import annotations
 from typing import Optional
 
 from ..models import (Account, AccountType, AccountVehicle, AccountYear,
-                      Beneficiary, ConversionStrategy, LegacyAssetResult,
-                      LegacyResult, Metrics, PlanInput, TransferCharacter,
-                      YearRow)
+                      Beneficiary, ConversionStrategy, InsurancePolicy,
+                      LegacyAssetResult, LegacyResult, Metrics, PlanInput,
+                      TransferCharacter, YearRow)
 from . import constants as C
 from . import socialsecurity as ss
 from .taxes import (TaxYearInput, aca_subsidy, compute_taxes, irmaa_tier,
@@ -80,6 +80,24 @@ class SimAccount:
         self.drag = 0.0  # accumulation-phase annual tax on divs/interest
 
 
+class SimInsurance:
+    """Internal state for a whole-life policy. Held parallel to self.accounts;
+    never enters the withdrawal waterfall. Its cash value counts in net worth
+    while in force; at the insured's death the (tax-free) death benefit is paid
+    to the survivor's portfolio (mid-plan) or to the estate (terminal)."""
+    def __init__(self, spec: InsurancePolicy):
+        self.spec = spec
+        self.owner = spec.owner
+        self.cash_value = spec.cash_value
+        self.basis = spec.premiums_paid_to_date  # total premiums paid (surrender basis)
+        self.active = True
+        self.growth = 0.0
+
+    @property
+    def rate(self) -> float:
+        return self.spec.cash_value_return
+
+
 class YearScratch:
     def __init__(self):
         self.withdrawals_by_type: dict[str, float] = {}
@@ -114,6 +132,12 @@ class Simulator:
         self.end_year = max(by + p.death_age
                             for by, p in zip(self.birth_years, self.persons))
         self.warnings: list[str] = []
+
+        self.policies = [SimInsurance(p) for p in plan.insurance_policies]
+        # per-year insurance scratch (set by prepare_insurance each year)
+        self._ins_premium = 0.0
+        self._ins_surrender_gain = 0.0
+        self._death_benefit_paid_year = 0.0
 
         self.accounts = [SimAccount(s) for s in plan.accounts]
         if not any(x.spec.type in (AccountType.taxable, AccountType.cash)
@@ -365,6 +389,7 @@ class Simulator:
             if not any(self.alive(i, year) for i in range(len(self.persons))):
                 break
 
+            self._death_benefit_paid_year = 0.0
             # spousal rollover: survivor inherits the deceased's accounts
             for i in range(len(self.persons)):
                 if not self.alive(i, year):
@@ -372,6 +397,18 @@ class Simulator:
                         for acct in self.accounts:
                             if acct.owner == i:
                                 acct.owner = 1 - i
+                        # life insurance: the death benefit is paid (income-tax-
+                        # free, IRC §101) into the surviving spouse's portfolio.
+                        for p in self.policies:
+                            if p.active and p.owner == i:
+                                db = p.spec.death_benefit
+                                tgt = self.surplus_account()
+                                tgt.balance += db
+                                tgt.contribution += db
+                                if tgt.spec.type == AccountType.taxable:
+                                    tgt.basis += db
+                                p.active = False
+                                self._death_benefit_paid_year += db
                     if self.ss_level[i] > 0:
                         self.deceased_ss_level = max(self.deceased_ss_level,
                                                      self.ss_level[i])
@@ -383,6 +420,7 @@ class Simulator:
             retired = year >= self.retirement_year
             status = self.filing_status(year)
             self.update_ss_levels(year)
+            self.prepare_insurance(year)
             dividends, interest = self.start_of_year_income()
 
             # a future home purchase activates here: the mortgage appears and a
@@ -406,6 +444,20 @@ class Simulator:
                     acct.basis += acct.start_balance * min(
                         self.a.taxable_dividend_yield, max(acct.spec.rate(), 0.0))
                     acct.basis = min(acct.basis, acct.balance)
+
+            # whole-life cash value compounds tax-deferred (no annual drag)
+            for p in self.policies:
+                p.growth = p.cash_value * p.rate if p.active else 0.0
+                p.cash_value += p.growth
+
+            # a surrender during accumulation is taxed at the flat pre-retirement
+            # rate, drawn from the portfolio (retirement surrenders flow through
+            # compute_taxes in retirement_year_step instead).
+            if not retired and self._ins_surrender_gain > 0:
+                t = self._ins_surrender_gain * self.a.pre_retirement_tax_rate
+                row.total_tax += t
+                tgt = self.surplus_account()
+                tgt.balance -= t
 
             if not retired:
                 # annual drag, paid from the accounts (shown net in growth)
@@ -443,7 +495,24 @@ class Simulator:
                 transfer_character=ACCOUNT_TRANSFER_CHARACTER[x.spec.type].value,
                 beneficiary=Beneficiary.heirs.value,
             ) for x in self.accounts]
-            row.total_assets = sum(x.balance for x in self.accounts)
+            # whole-life policies report their cash value (their balance-sheet
+            # value while in force); the death benefit is the terminal/legacy value.
+            row.accounts += [AccountYear(
+                name=p.spec.name, type=None, owner=p.owner,
+                start_balance=p.cash_value - p.growth, contribution=0.0,
+                withdrawal=0.0, growth=p.growth, end_balance=p.cash_value,
+                premium=(p.spec.annual_premium if retired and (
+                    p.spec.paid_up_age is None
+                    or self.age(p.owner, year) < p.spec.paid_up_age) else 0.0),
+                death_benefit=p.spec.death_benefit,
+                asset_class="insurance",
+                transfer_character=TransferCharacter.tax_free.value,
+                beneficiary=Beneficiary.heirs.value,
+            ) for p in self.policies if p.active]
+            row.premiums_paid = self._ins_premium if retired else 0.0
+            row.death_benefits_paid = self._death_benefit_paid_year
+            row.total_assets = (sum(x.balance for x in self.accounts)
+                                + sum(p.cash_value for p in self.policies if p.active))
             row.total_liabilities = sum(l["balance"] for l in self.liabilities
                                         if self._liab_active(l, year))
             row.net_worth = row.total_assets - row.total_liabilities
@@ -514,7 +583,9 @@ class Simulator:
             char = x.transfer_character \
                 or ACCOUNT_TRANSFER_CHARACTER[x.type].value
             dest = x.beneficiary or Beneficiary.heirs.value
-            gross = x.end_balance
+            # a life policy still in force at the end pays its death benefit
+            # (income-tax-free, IRC §101); its cash value is subsumed.
+            gross = x.death_benefit if x.asset_class == "insurance" else x.end_balance
             if dest == Beneficiary.charity.value:
                 tax = 0.0
                 to_charity += gross
@@ -550,6 +621,37 @@ class Simulator:
         """Qualified charitable distributions from tax-deferred accounts this
         year (IRC §408(d)(8)). Phase-1 hook: returns 0 until Phase 7."""
         return 0.0
+
+    def prepare_insurance(self, year: int) -> None:
+        """Process whole-life policies for the year, BEFORE the phase step so
+        the results are stable across the tax fixed point. Accrues premium basis
+        and handles surrenders. Sets per-year scratch:
+          self._ins_premium       -> level premium due (funded from the waterfall
+                                      in retirement; assumed wage-covered pre-ret).
+          self._ins_surrender_gain -> ordinary income from any surrender (§72(e)).
+        Death benefits are handled in the run() death block (mid-plan) and in
+        settle_estate (terminal)."""
+        self._ins_premium = 0.0
+        self._ins_surrender_gain = 0.0
+        for p in self.policies:
+            if not p.active or not self.alive(p.owner, year):
+                continue
+            age = self.age(p.owner, year)
+            # surrender: pay cash value into the portfolio; gain over total
+            # premiums paid is ordinary income (IRC §72(e)).
+            if p.spec.surrender_at_age is not None and age >= p.spec.surrender_at_age:
+                self._ins_surrender_gain += max(0.0, p.cash_value - p.basis)
+                tgt = self.surplus_account()
+                tgt.balance += p.cash_value
+                tgt.contribution += p.cash_value
+                if tgt.spec.type == AccountType.taxable:
+                    tgt.basis += p.cash_value  # after-tax proceeds: no future gain
+                p.active = False
+                continue
+            # level premium until the policy is paid up (basis accrues either way)
+            if p.spec.paid_up_age is None or age < p.spec.paid_up_age:
+                p.basis += p.spec.annual_premium
+                self._ins_premium += p.spec.annual_premium
 
     # -------------------------------------------------------- accumulation yr
     def accumulation_year_step(self, year: int, status: str,
@@ -855,17 +957,19 @@ class Simulator:
 
             # 4) cover remaining need from the waterfall
             need = (spend_goal + debt_payments + home_purchase + healthcare_net
-                    + tax_guess + self.annual_gifts(year))
+                    + tax_guess + self.annual_gifts(year) + self._ins_premium)
             resources = ss_total + other_taxable + other_nontaxable + rmd_total
             gap = need + scratch.penalties - resources
             if gap > 0:
                 got = self.waterfall_withdraw(gap, scratch, year)
                 scratch.shortfall = max(0.0, gap - got)
 
-            # 5) taxes on the resulting income picture
+            # 5) taxes on the resulting income picture (a policy surrender adds
+            # ordinary income on the cash value above total premiums, IRC §72(e))
             td_withdrawn = scratch.withdrawals_by_type.get("tax_deferred", 0.0)
             ordinary = (td_withdrawn + scratch.roth_conversion
-                        + scratch.hsa_nonmedical + other_taxable + interest)
+                        + scratch.hsa_nonmedical + other_taxable + interest
+                        + self._ins_surrender_gain)
             tax_res = compute_taxes(TaxYearInput(
                 year=year, filing_status=status, inflation=a.inflation,
                 ordinary_income=ordinary, ss_benefits=ss_total,
@@ -895,7 +999,8 @@ class Simulator:
         # rmd_total must NOT be added again here — doing so double-counts forced
         # distributions and mints phantom surplus in high-RMD years.
         need = (spend_goal + debt_payments + home_purchase + healthcare_net
-                + tax_guess + scratch.penalties + self.annual_gifts(year))
+                + tax_guess + scratch.penalties + self.annual_gifts(year)
+                + self._ins_premium)
         resources = (ss_total + other_taxable + other_nontaxable
                      + sum(scratch.withdrawals_by_type.values()))
         surplus = max(0.0, resources - need - scratch.shortfall)

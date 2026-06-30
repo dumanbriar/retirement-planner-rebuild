@@ -65,6 +65,22 @@ export function validatePlanInput(input: PlanInput): FieldErrors {
       errors[k("survivor_pct")] = "Survivor benefit must be 0–100%.";
   });
 
+  (input.insurance_policies ?? []).forEach((p, i) => {
+    const k = (f: string) => `insurance_policies.${i}.${f}`;
+    if (!p.name.trim()) errors[k("name")] = "Name is required.";
+    if (!(p.death_benefit >= 0)) errors[k("death_benefit")] = "Must be ≥ 0.";
+    if (!(p.annual_premium >= 0)) errors[k("annual_premium")] = "Must be ≥ 0.";
+    if (!(p.cash_value >= 0)) errors[k("cash_value")] = "Must be ≥ 0.";
+    if (!(p.premiums_paid_to_date >= 0)) errors[k("premiums_paid_to_date")] = "Must be ≥ 0.";
+    if (!inRange(p.cash_value_return, -0.1, 0.2))
+      errors[k("cash_value_return")] = "Return must be −10% to 20%.";
+    if (p.paid_up_age != null && !inRange(p.paid_up_age, 30, 110))
+      errors[k("paid_up_age")] = "Paid-up age must be 30–110.";
+    if (p.surrender_at_age != null && !inRange(p.surrender_at_age, 30, 110))
+      errors[k("surrender_at_age")] = "Surrender age must be 30–110.";
+    if (p.owner >= input.persons.length) errors[k("owner")] = "Owner is out of range.";
+  });
+
   if (!(input.annual_spending > 0))
     errors["annual_spending"] = "Annual retirement spending must be greater than 0.";
 

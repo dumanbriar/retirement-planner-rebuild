@@ -62,7 +62,9 @@ export function NetWorthChart({
         hsa: 0,
         cash: 0,
       };
-      for (const a of y.accounts) byType[a.type] += a.end_balance;
+      // Legacy assets (insurance, etc.) have no account type; they appear in the
+      // Legacy panel rather than this account-type composition.
+      for (const a of y.accounts) if (a.type) byType[a.type] += a.end_balance;
       return {
         year: y.year,
         ages: y.ages,

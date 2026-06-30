@@ -1,4 +1,12 @@
-import type { Account, Assumptions, IncomeStream, Liability, Person, PlanInput } from "./types";
+import type {
+  Account,
+  Assumptions,
+  IncomeStream,
+  InsurancePolicy,
+  Liability,
+  Person,
+  PlanInput,
+} from "./types";
 import { DEFAULT_RETURNS } from "./types";
 
 export const DEFAULT_ASSUMPTIONS: Assumptions = {
@@ -104,6 +112,7 @@ export const SAMPLE_INPUT: PlanInput = {
     { name: "Mortgage", balance: 220_000, interest_rate: 0.0325, annual_payment: 24_000 },
   ],
   income_streams: [],
+  insurance_policies: [],
   annual_spending: 96_000,
   assumptions: {
     ...DEFAULT_ASSUMPTIONS,
@@ -159,5 +168,19 @@ export function newIncomeStream(): IncomeStream {
     cola: true,
     taxable: true,
     survivor_pct: 0,
+  };
+}
+
+export function newInsurancePolicy(): InsurancePolicy {
+  return {
+    name: "Whole life policy",
+    owner: 0,
+    annual_premium: 0,
+    paid_up_age: null,
+    cash_value: 0,
+    cash_value_return: 0.04,
+    death_benefit: 0,
+    premiums_paid_to_date: 0,
+    surrender_at_age: null,
   };
 }

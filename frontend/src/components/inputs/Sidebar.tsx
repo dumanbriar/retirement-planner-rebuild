@@ -24,6 +24,7 @@ import { HouseholdSection } from "./HouseholdSection";
 import { AccountsSection } from "./AccountsSection";
 import { LiabilitiesSection } from "./LiabilitiesSection";
 import { IncomeStreamsSection } from "./IncomeStreamsSection";
+import { InsuranceSection } from "./InsuranceSection";
 import { SpendingSection } from "./SpendingSection";
 import { AssumptionsSection } from "./AssumptionsSection";
 import { PlanIO } from "./PlanIO";
@@ -189,6 +190,21 @@ export function Sidebar({
           }
         >
           <IncomeStreamsSection {...sectionProps} />
+        </SectionAccordion>
+
+        <SectionAccordion
+          icon={ShieldCheck}
+          title="Life insurance"
+          hasError={hasErr("insurance_policies.")}
+          summary={
+            input.insurance_policies.length === 0
+              ? "None"
+              : input.insurance_policies
+                  .map((p) => `${p.name} ${fmtCurrency(p.death_benefit)}`)
+                  .join(" · ")
+          }
+        >
+          <InsuranceSection {...sectionProps} />
         </SectionAccordion>
 
         <SectionAccordion

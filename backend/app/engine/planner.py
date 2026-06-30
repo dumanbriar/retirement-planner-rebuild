@@ -407,6 +407,18 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
                    "This is optimistic for large earnings pools; Roth is last in the "
                    "withdrawal waterfall so this edge rarely applies."},
     ]
+    if plan.insurance_policies:
+        notes.append({
+            "label": "Whole-life insurance", "value": "cash value + death benefit",
+            "kind": "assumed",
+            "source": "Premiums, cash value, and death benefit are user-entered LEVEL "
+                      "NOMINAL amounts (not today's dollars). Cash value grows tax-deferred "
+                      "at the assumed rate; the death benefit passes income-tax-free to "
+                      "heirs/survivor (IRC §101); a surrender realizes cash value over total "
+                      "premiums paid as ordinary income (IRC §72(e)). Premiums are funded "
+                      "from the portfolio in retirement (assumed wage-covered before). NOT "
+                      "modeled: policy loans, dividends/paid-up additions, MEC rules, "
+                      "variable/indexed crediting."})
     if any(getattr(s, "survivor_pct", 0) > 0 for s in plan.income_streams):
         notes.append({
             "label": "Pension/annuity survivor benefit", "value": "continues at set %",

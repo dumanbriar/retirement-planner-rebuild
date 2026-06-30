@@ -16,8 +16,8 @@ from app.engine.taxes import (TaxYearInput, aca_applicable_pct, aca_subsidy,
                               taxable_social_security)
 from app.engine.planner import SPLIT_LEVELS, apply_split
 from app.models import (Account, AccountType, AccountVehicle, Assumptions,
-                        ConversionStrategy, IncomeStream, Liability, Person,
-                        PlanInput)
+                        ConversionStrategy, IncomeStream, InsurancePolicy,
+                        Liability, Person, PlanInput)
 
 
 # ----------------------------------------------------------- federal tax
@@ -595,6 +595,87 @@ def test_income_stream_stops_at_death_without_survivor():
     by = {y.year: y for y in rows}
     assert math.isclose(by[2060].other_income, 40_000, abs_tol=1)
     assert by[2064].other_income == 0.0  # Sam dead -> nothing continues
+
+
+# ------------------------------------------- whole-life insurance (Phase 3)
+def _solo_with_policy(policy: InsurancePolicy, **kw) -> PlanInput:
+    return PlanInput(
+        persons=[Person(name="Pat", current_age=60, retirement_age=62, death_age=85,
+                        ss_monthly_at_fra=2500, ss_claim_age=67)],
+        accounts=[
+            Account(name="401k", type=AccountType.tax_deferred, owner=0,
+                    balance=1_200_000, annual_contribution=0, expected_return=0.05),
+            Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                    balance=300_000, cost_basis=200_000, annual_contribution=0,
+                    expected_return=0.05),
+        ],
+        insurance_policies=[policy],
+        annual_spending=60_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none),
+        **kw)
+
+
+def test_insurance_cash_value_grows_tax_deferred():
+    pol = InsurancePolicy(name="WL", owner=0, annual_premium=0, cash_value=100_000,
+                          cash_value_return=0.04, death_benefit=500_000,
+                          premiums_paid_to_date=80_000)
+    rows = Simulator(_solo_with_policy(pol), strategy=ConversionStrategy.none).run()[0]
+    ins = next(a for a in rows[0].accounts if a.asset_class == "insurance")
+    # 100,000 * 1.04 = 104,000, no annual tax drag (grows tax-deferred)
+    assert math.isclose(ins.end_balance, 104_000, abs_tol=1)
+    assert math.isclose(ins.growth, 4_000, abs_tol=1)
+
+
+def test_insurance_premium_drawn_from_portfolio_in_retirement():
+    pol = InsurancePolicy(name="WL", owner=0, annual_premium=12_000, cash_value=50_000,
+                          cash_value_return=0.0, death_benefit=400_000)
+    no_prem = InsurancePolicy(name="WL", owner=0, annual_premium=0, cash_value=50_000,
+                              cash_value_return=0.0, death_benefit=400_000)
+    m_base = Simulator(_solo_with_policy(no_prem), strategy=ConversionStrategy.none).run()[1]
+    rows, m_with = Simulator(_solo_with_policy(pol), strategy=ConversionStrategy.none).run()
+    # level premiums deplete the portfolio over retirement
+    assert m_base.ending_net_worth_real - m_with.ending_net_worth_real > 50_000
+    ret = next(r for r in rows if r.phase == "retirement")
+    assert math.isclose(ret.premiums_paid, 12_000, abs_tol=1)
+
+
+def test_insurance_death_benefit_paid_to_survivor_tax_free():
+    pol = InsurancePolicy(name="Sam WL", owner=0, annual_premium=0, cash_value=0,
+                          cash_value_return=0.0, death_benefit=300_000)
+    with_pol = {y.year: y for y in
+                Simulator(couple_plan(insurance_policies=[pol]),
+                          strategy=ConversionStrategy.none).run()[0]}
+    base = {y.year: y for y in
+            Simulator(couple_plan(), strategy=ConversionStrategy.none).run()[0]}
+    # Sam (owner 0) dies at 92 in 2063; the face is paid into Alex's portfolio in
+    # 2064, income-tax-free, lifting assets by ~the death benefit vs the baseline.
+    assert math.isclose(with_pol[2064].death_benefits_paid, 300_000, abs_tol=1)
+    bump = with_pol[2064].total_assets - base[2064].total_assets
+    assert 250_000 < bump < 360_000
+
+
+def test_insurance_death_benefit_in_estate_income_tax_free():
+    pol = InsurancePolicy(name="WL", owner=0, annual_premium=0, cash_value=40_000,
+                          cash_value_return=0.0, death_benefit=500_000)
+    result = build_plan(_solo_with_policy(pol))
+    ins = next(a for a in result.legacy.assets if a.asset_class == "insurance")
+    assert math.isclose(ins.gross, 500_000, abs_tol=1)  # death benefit, not cash value
+    assert ins.tax == 0                                  # income-tax-free (IRC §101)
+    assert ins.transfer_character == "tax_free"
+
+
+def test_insurance_surrender_realizes_ordinary_gain():
+    # cash value 180k over 120k of premiums paid -> 60k ordinary gain (IRC §72(e)).
+    pol = InsurancePolicy(name="WL", owner=0, annual_premium=0, cash_value=180_000,
+                          cash_value_return=0.0, death_benefit=500_000,
+                          premiums_paid_to_date=120_000, surrender_at_age=70)
+    sim = Simulator(_solo_with_policy(pol), strategy=ConversionStrategy.none)
+    before = sim.surplus_account().balance
+    sim.prepare_insurance(2036)  # Pat (born 1966) is 70 in 2036
+    assert math.isclose(sim._ins_surrender_gain, 60_000, abs_tol=1)
+    assert not sim.policies[0].active
+    # the full cash value lands in the portfolio
+    assert math.isclose(sim.surplus_account().balance - before, 180_000, abs_tol=1)
 # -------------------------------- surplus reinvestment conservation (regression)
 def test_no_phantom_surplus_from_rmds():
     # Regression: forced RMDs were double-counted as available resources in the

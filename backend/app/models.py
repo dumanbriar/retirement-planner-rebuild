@@ -129,6 +129,24 @@ class IncomeStream(BaseModel):
     survivor_pct: float = Field(default=0.0, ge=0, le=1.0)
 
 
+class InsurancePolicy(BaseModel):
+    """Whole / permanent life insurance with cash value.
+
+    Amounts here are LEVEL NOMINAL figures (the policy's actual contractual
+    values), NOT today's dollars — whole-life premiums and the death benefit are
+    fixed in nominal terms. The cash value grows at `cash_value_return`.
+    """
+    name: str = "Whole life policy"
+    owner: int = Field(default=0, ge=0, le=1)
+    annual_premium: float = Field(default=0, ge=0)       # level nominal $/yr
+    paid_up_age: Optional[int] = Field(default=None, ge=30, le=110)  # premiums stop at this age
+    cash_value: float = Field(default=0, ge=0)           # current surrender value, nominal
+    cash_value_return: float = Field(default=0.04, ge=-0.10, le=0.20)  # assumed
+    death_benefit: float = Field(ge=0)                   # face amount, level nominal
+    premiums_paid_to_date: float = Field(default=0, ge=0)  # basis for surrender gain
+    surrender_at_age: Optional[int] = Field(default=None, ge=30, le=110)  # optional lapse
+
+
 class ConversionStrategy(str, Enum):
     none = "none"
     fill_10 = "fill_10"
@@ -175,6 +193,7 @@ class PlanInput(BaseModel):
     accounts: list[Account] = Field(min_length=1, max_length=20)
     liabilities: list[Liability] = Field(default_factory=list, max_length=20)
     income_streams: list[IncomeStream] = Field(default_factory=list, max_length=20)
+    insurance_policies: list[InsurancePolicy] = Field(default_factory=list, max_length=20)
     annual_spending: float = Field(gt=0)  # retirement spend goal, today's $
     assumptions: Assumptions = Field(default_factory=Assumptions)
 
@@ -187,6 +206,9 @@ class PlanInput(BaseModel):
         for s in self.income_streams:
             if s.owner >= n:
                 raise ValueError(f"Income stream '{s.name}' owner index out of range")
+        for p in self.insurance_policies:
+            if p.owner >= n:
+                raise ValueError(f"Insurance policy '{p.name}' owner index out of range")
         return self
 
 
@@ -195,7 +217,7 @@ class PlanInput(BaseModel):
 class AccountYear(BaseModel):
     """One account's audit trail for one year."""
     name: str
-    type: AccountType
+    type: Optional[AccountType] = None   # None for legacy assets (see asset_class)
     owner: int
     start_balance: float
     contribution: float
@@ -209,6 +231,7 @@ class AccountYear(BaseModel):
     premium: float = 0                  # insurance premium outflow
     distribution: float = 0             # annuity payout / private distribution out
     death_benefit_paid: float = 0       # life-insurance death benefit paid to estate
+    death_benefit: float = 0            # standing face amount (insurance terminal value)
     asset_class: str = "account"        # account | insurance | annuity | private | realestate
     transfer_character: Optional[str] = None  # TransferCharacter value
     beneficiary: str = "heirs"          # Beneficiary value

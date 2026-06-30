@@ -26,6 +26,7 @@ export function coercePlanInput(
     accounts: parsed.accounts,
     liabilities: parsed.liabilities ?? [],
     income_streams: parsed.income_streams ?? [],
+    insurance_policies: parsed.insurance_policies ?? [],
     annual_spending: parsed.annual_spending,
     assumptions: { ...DEFAULT_ASSUMPTIONS, ...(parsed.assumptions ?? {}) },
   };

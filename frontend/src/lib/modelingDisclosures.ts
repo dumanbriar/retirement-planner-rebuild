@@ -53,6 +53,17 @@ export const MODELING_DISCLOSURES: Record<string, ModelingSpec> = {
     modeled: ["Interest taxed annually as ordinary income", "Basis step-up at death"],
     notModeled: ["Distinct money-market vs. savings yields"],
   },
+  insurance: {
+    modeled: [
+      "Level nominal premiums (funded from the portfolio in retirement)",
+      "Cash value grows tax-deferred at the assumed rate",
+      "Death benefit passes income-tax-free to heirs/survivor (IRC §101)",
+      "Surrender taxes cash value over total premiums as ordinary income (IRC §72(e))",
+    ],
+    notModeled: [
+      "Policy loans, dividends / paid-up additions, MEC rules, variable/indexed crediting",
+    ],
+  },
 };
 
 export function modelingSpec(key: string): ModelingSpec | undefined {
