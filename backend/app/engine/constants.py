@@ -188,6 +188,51 @@ EARLY_WITHDRAWAL_PENALTY = 0.10
 EARLY_WITHDRAWAL_AGE = 60  # whole-year approximation of 59.5, documented
 
 # ---------------------------------------------------------------------------
+# Retirement-contribution limits, tax year 2026. Verified against IRS Notice
+# 2025-67 (the 2026 cost-of-living retirement-plan limits). Indexed annually;
+# the engine grows them by the plan inflation assumption from this base year
+# (the IRS uses rounded chained-CPI steps). UPDATE EACH NOVEMBER from the next
+# year's IRS COLA notice — tracked in CONSTANT_METADATA["contribution_limits"]
+# / ["roth_ira_phaseout"], which surface a stale-review flag in the UI/workbook.
+# These cap the Roth-vs-Traditional split optimizer's allocations and drive its
+# limit warnings.
+#
+# 402(g) elective-deferral limit (401(k)/403(b)/457(b)) applies per person
+# across BOTH pre-tax and Roth deferrals within employer plans combined.
+ELECTIVE_DEFERRAL_LIMIT = 24_500           # 2026 (was $23,500 in 2025)
+ELECTIVE_DEFERRAL_CATCHUP_50 = 8_000       # age 50+ catch-up (IRC sec. 414(v))
+ELECTIVE_DEFERRAL_CATCHUP_60_63 = 11_250   # ages 60-63 (SECURE 2.0 sec. 109)
+# IRA limit (IRC sec. 219) applies per person across traditional + Roth IRA.
+IRA_CONTRIBUTION_LIMIT = 7_500             # 2026 (was $7,000 in 2025)
+IRA_CATCHUP_50 = 1_100                      # age 50+ (SECURE 2.0 sec. 108, indexed)
+# Roth IRA contribution MAGI phase-out ranges (IRC sec. 408A(c)(3)), 2026: direct
+# Roth IRA contributions phase out across (start, end); above `end` a direct
+# contribution is disallowed and a backdoor Roth is required. NOT applicable to
+# Roth 401(k) (employer Roth has no income limit). MFS is $0–$10,000 (not modeled).
+ROTH_IRA_PHASEOUT = {
+    "single": (153_000, 168_000),
+    "mfj": (242_000, 252_000),
+}
+
+
+def elective_deferral_limit(age: int) -> float:
+    """402(g) elective-deferral limit for a person of this age (base-year $)."""
+    limit = ELECTIVE_DEFERRAL_LIMIT
+    if 60 <= age <= 63:
+        limit += ELECTIVE_DEFERRAL_CATCHUP_60_63
+    elif age >= 50:
+        limit += ELECTIVE_DEFERRAL_CATCHUP_50
+    return float(limit)
+
+
+def ira_contribution_limit(age: int) -> float:
+    """IRA contribution limit for a person of this age (base-year $)."""
+    limit = IRA_CONTRIBUTION_LIMIT
+    if age >= 50:
+        limit += IRA_CATCHUP_50
+    return float(limit)
+
+# ---------------------------------------------------------------------------
 # Freshness metadata: when each constant group was last verified against its
 # primary source, and how often it is expected to change.
 # update_cycle values:
@@ -226,12 +271,17 @@ CONSTANT_METADATA: dict[str, dict[str, str]] = {
         "review_url": "https://www.cms.gov/newsroom/fact-sheets/2026-medicare-parts-b-premiums-and-deductibles",
     },
     "fpl": {
-        "last_updated": "2025-01-22",
+        # 2025 HHS guidelines ($15,650 + $5,500/add'l) govern 2026 ACA coverage;
+        # re-verified 2026-06-21 (400% cliff = $62,600 single / $128,600 family-of-4).
+        "last_updated": "2026-06-21",
         "update_cycle": "annual-january",
         "review_url": "https://aspe.hhs.gov/topics/poverty-economic-mobility/poverty-guidelines",
     },
     "aca_applicable_pct": {
-        "last_updated": "2025-05-01",
+        # Re-verified 2026-06-21 against Rev. Proc. 2025-25: the 2026 table
+        # (2.10%–9.96%, 400% FPL cliff) is unchanged — enhanced ARPA/IRA credits
+        # expired 12/31/2025, so 2026 reverts to the original schedule + cliff.
+        "last_updated": "2026-06-21",
         "update_cycle": "annual-may",
         "review_url": "https://www.irs.gov/pub/irs-drop/rp-25-25.pdf",
     },
@@ -249,6 +299,16 @@ CONSTANT_METADATA: dict[str, dict[str, str]] = {
         "last_updated": "2025-07-04",
         "update_cycle": "legislative",
         "review_url": "https://www.congress.gov/bill/119th-congress/house-bill/1",
+    },
+    "contribution_limits": {
+        "last_updated": "2025-11-01",
+        "update_cycle": "annual-november",
+        "review_url": "https://www.irs.gov/pub/irs-drop/n-25-67.pdf",
+    },
+    "roth_ira_phaseout": {
+        "last_updated": "2025-11-01",
+        "update_cycle": "annual-november",
+        "review_url": "https://www.irs.gov/pub/irs-drop/n-25-67.pdf",
     },
 }
 

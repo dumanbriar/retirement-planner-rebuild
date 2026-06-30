@@ -11,6 +11,7 @@ import { IncomeSpendingChart } from "./IncomeSpendingChart";
 import { TaxChart } from "./TaxChart";
 import { ConversionTable } from "./ConversionTable";
 import { SSGridTable } from "./SSGridTable";
+import { ContributionSplitTable } from "./ContributionSplitTable";
 import { SensitivityTable } from "./SensitivityTable";
 import { LegacyPanel } from "./LegacyPanel";
 import { YearTable } from "./YearTable";
@@ -107,6 +108,12 @@ export function Dashboard({
 
       <ConversionTable comparison={result.conversion_comparison} metrics={result.metrics} />
 
+      <ContributionSplitTable
+        cells={result.contribution_split}
+        metrics={result.metrics}
+        personNames={personNames}
+      />
+
       <SSGridTable grid={result.ss_grid} metrics={result.metrics} personNames={personNames} />
 
       <SensitivityTable rows={result.sensitivity} metrics={result.metrics} />
@@ -118,7 +125,8 @@ export function Dashboard({
       <p className="pb-4 text-center text-[11px] text-slate-400">
         Deterministic planning model — not investment, tax, or legal advice. Statutory parameters
         are 2026 values indexed at the assumed inflation rate; see the assumptions strip for
-        provenance of every modeling choice.
+        provenance of every modeling choice. Your inputs stay in your browser and are sent to the
+        stateless engine only to compute — nothing is stored on a server or shared.
       </p>
     </div>
   );

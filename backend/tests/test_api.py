@@ -49,3 +49,25 @@ def test_plan_excel_endpoint_returns_xlsx():
     assert r.status_code == 200, r.text
     assert "spreadsheetml" in r.headers.get("content-type", "")
     assert r.content[:2] == b"PK"  # valid zip/xlsx
+
+
+def test_plan_endpoint_optimizes_contribution_split():
+    req = {
+        **VALID_REQUEST,
+        "persons": [{**VALID_REQUEST["persons"][0], "salary": 150_000}],
+        "accounts": [
+            {"name": "401k", "type": "tax_deferred", "owner": 0,
+             "vehicle": "employer", "balance": 500_000, "annual_contribution": 15_000},
+            {"name": "Roth 401k", "type": "roth", "owner": 0,
+             "vehicle": "employer", "balance": 100_000, "annual_contribution": 5_000},
+            {"name": "Brokerage", "type": "taxable", "owner": 0,
+             "balance": 50_000, "cost_basis": 50_000, "annual_contribution": 0},
+        ],
+        "assumptions": {"roth_conversion_strategy": "none",
+                        "optimize_contribution_split": True},
+    }
+    r = client.post("/api/plan", json=req)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["contribution_split"]  # non-empty list of evaluated splits
+    assert len(body["metrics"]["chosen_contribution_split"]) == 1

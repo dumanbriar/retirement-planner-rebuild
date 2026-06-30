@@ -80,6 +80,16 @@ function PersonFields({
           className={dense ? "col-span-2" : "col-span-2"}
           help="Age benefits start (62–70). Early claiming reduces the benefit 5/9% per month (first 36 months) then 5/12%; delaying past FRA earns 2/3% per month to 70. Check 'Optimize Social Security claiming ages' to let the engine search all combinations."
         />
+        <NumberField
+          label="Annual salary (today's $)"
+          value={person.salary}
+          onChange={(salary) => set({ salary })}
+          min={0}
+          prefix="$"
+          error={e("salary")}
+          className="col-span-2"
+          help="Gross earned income while working, in today's dollars. Enables real working-year income tax and the marginal bracket used to weigh Traditional vs Roth contributions. Leave 0 if not working or not optimizing the contribution split."
+        />
       </div>
     </div>
   );

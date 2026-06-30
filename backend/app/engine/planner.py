@@ -14,14 +14,19 @@ from __future__ import annotations
 
 import copy
 
-from ..models import (ConversionStrategy, PlanInput, PlanResult,
-                      SensitivityRow, SSGridCell, StrategyComparison)
+from ..models import (Account, AccountType, AccountVehicle,
+                      ContributionSplitCell, ConversionStrategy, PlanInput,
+                      PlanResult, SensitivityRow, SSGridCell, StrategyComparison)
 from . import constants as C
 from .engine import Simulator
 
 FILL_STRATEGIES = [ConversionStrategy.none, ConversionStrategy.fill_10,
                    ConversionStrategy.fill_12, ConversionStrategy.fill_22,
                    ConversionStrategy.fill_24]
+
+# Traditional-vs-Roth split candidates: fraction of the contribution budget
+# routed to Roth. A small, explainable grid (like the bracket-fill levels).
+SPLIT_LEVELS = [0.0, 0.25, 0.5, 0.75, 1.0]
 
 
 def _run(plan: PlanInput, strategy: ConversionStrategy,
@@ -87,6 +92,121 @@ def optimize_ss(plan: PlanInput, strategy: ConversionStrategy
         if val > best_val:
             best, best_val = ages, val
     return best or [p.ss_claim_age for p in persons], grid
+
+
+def _retirement_budget(plan: PlanInput, owner: int) -> float:
+    """A person's combined Traditional + Roth annual contribution budget."""
+    return sum(a.annual_contribution for a in plan.accounts if a.owner == owner
+               and a.type in (AccountType.tax_deferred, AccountType.roth))
+
+
+def _current_household_split(plan: PlanInput) -> float:
+    """Household-wide current Roth fraction = total Roth contributions / total
+    Traditional+Roth contribution budget across all persons."""
+    total = sum(_retirement_budget(plan, i) for i in range(len(plan.persons)))
+    if total <= 0:
+        return 0.0
+    roth = sum(a.annual_contribution for a in plan.accounts
+               if a.type == AccountType.roth)
+    return roth / total
+
+
+def apply_split(plan: PlanInput, roth_pct: list[float]) -> PlanInput:
+    """Return a deepcopy with each person's Traditional/Roth contributions
+    reallocated to `roth_pct`. The split is applied within each vehicle bucket
+    (employer / IRA) so per-vehicle totals — and therefore the applicable
+    contribution limits — are preserved."""
+    p2 = copy.deepcopy(plan)
+    for i in range(len(p2.persons)):
+        pct = roth_pct[i]
+        for vehicle in (AccountVehicle.employer, AccountVehicle.ira):
+            td = [a for a in p2.accounts if a.owner == i
+                  and a.type == AccountType.tax_deferred
+                  and a.limit_vehicle() == vehicle]
+            roth = [a for a in p2.accounts if a.owner == i
+                    and a.type == AccountType.roth
+                    and a.limit_vehicle() == vehicle]
+            budget = sum(a.annual_contribution for a in td + roth)
+            if budget <= 0:
+                continue
+            roth_amt = budget * pct
+            like = (td or roth)[0]
+            roth_home = roth[0] if roth else _synth(p2, i, AccountType.roth, vehicle, like)
+            td_home = td[0] if td else _synth(p2, i, AccountType.tax_deferred, vehicle, like)
+            for a in td + roth:
+                a.annual_contribution = 0.0
+            roth_home.annual_contribution = roth_amt
+            td_home.annual_contribution = budget - roth_amt
+    return p2
+
+
+def _synth(plan: PlanInput, owner: int, type_: AccountType,
+           vehicle: AccountVehicle, like: Account) -> Account:
+    """Add a zero-balance sibling account so a person can hold the other side
+    of a split they don't currently have (mirrors the engine's auto-added
+    surplus account)."""
+    label = "Roth" if type_ == AccountType.roth else "Traditional"
+    acct = Account(name=f"{label} ({vehicle.value}, optimizer)", type=type_,
+                   owner=owner, vehicle=vehicle, balance=0.0,
+                   annual_contribution=0.0, expected_return=like.expected_return)
+    plan.accounts.append(acct)
+    return acct
+
+
+def optimize_contribution_split(
+        plan: PlanInput, claim_ages: list[int]
+) -> tuple[list[float], list[ContributionSplitCell]]:
+    """Suggest the household-wide Traditional-vs-Roth contribution split.
+
+    A couple files jointly, so only the household's total Roth fraction matters
+    (a dollar in either spouse's Roth is identical to the household). We search
+    a single percentage applied uniformly to both spouses rather than an
+    independent per-person grid.
+
+    Each split is shown at its BEST: Roth conversions are re-optimized for it
+    (forced to 'auto') so the RMD-vs-conversion tradeoff is visible end-to-end —
+    a Traditional-heavy split leans on aggressive conversions, a Roth-heavy one
+    needs few. Reuses resolve_strategy (the conversion optimizer); the objective
+    is ending after-tax wealth (success first).
+
+    Returns (suggested split as a single-element [household_pct], cells). This is
+    ADVISORY: build_plan does not apply it to the projection, and because the
+    cells assume optimal conversions their figures can exceed the headline plan
+    when the user's conversion setting is off.
+    """
+    n = len(plan.persons)
+    if sum(_retirement_budget(plan, i) for i in range(n)) <= 0:
+        return [], []
+    current = round(_current_household_split(plan), 4)
+
+    def evaluate(p: PlanInput) -> tuple[str, StrategyComparison]:
+        # best achievable for this split: optimize Roth conversions (force auto)
+        p.assumptions.roth_conversion_strategy = ConversionStrategy.auto
+        best_strat, comps = resolve_strategy(p, claim_ages)
+        bc = next(c for c in comps if c.strategy == best_strat.value)
+        return best_strat.value, bc
+
+    def cell(pct: float, is_current: bool, p: PlanInput) -> ContributionSplitCell:
+        conv, bc = evaluate(p)
+        return ContributionSplitCell(
+            roth_pct=[round(pct, 4)], ending_after_tax_real=bc.ending_after_tax_real,
+            lifetime_taxes_real=bc.lifetime_taxes_real, depletion_age=bc.depletion_age,
+            conversion_strategy=conv, is_current=is_current)
+
+    def score(c: ContributionSplitCell) -> float:
+        return (0 if c.depletion_age is not None else 1e15) + c.ending_after_tax_real
+
+    cells = [cell(current, True, copy.deepcopy(plan))]
+    best, best_val = [current], score(cells[0])
+
+    for pct in SPLIT_LEVELS:
+        if abs(pct - current) < 0.005:
+            continue  # the current cell already represents this household %
+        c = cell(pct, False, apply_split(plan, [pct] * n))
+        cells.append(c)
+        if score(c) > best_val:
+            best, best_val = [round(pct, 4)], score(c)
+    return best, cells
 
 
 def sensitivity_scenarios(plan: PlanInput, strategy: ConversionStrategy,
@@ -210,16 +330,59 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
                    "reflects only the new debt and the cash spent — it understates reality "
                    "by roughly the property's value. Pre-retirement mortgage payments are "
                    "assumed covered by (unmodeled) wages, as with existing debts; the down "
-                   "payment is always drawn from the portfolio."},
+                   "payment is always drawn from the portfolio. Your entered retirement "
+                   "contributions are NOT reduced in the purchase year — the full "
+                   "contribution is made and the down payment is then drawn from accumulated "
+                   "assets (cash and taxable first; if those fall short it draws from "
+                   "tax-advantaged accounts, with a 10% early-withdrawal penalty before age "
+                   "59.5 and a warning). To model funding the purchase by saving less, lower "
+                   "your contributions for the relevant years."},
         {"label": "Withdrawal order", "value": "cash > taxable > tax-deferred > Roth > HSA",
          "kind": "modeled", "source": "Conventional tax-efficient sequencing; HSA reserved "
                    "for qualified medical first (tax-free per IRC sec. 223)."},
         {"label": "Roth conversion strategy", "value": a.roth_conversion_strategy.value,
          "kind": "modeled", "source": "Bracket-fill conversions; 'auto' exhaustively "
                    "compares fill levels on ending after-tax wealth."},
-        {"label": "Pre-retirement tax treatment", "value": f"{fpct(a.pre_retirement_tax_rate)} flat",
-         "kind": "assumed", "source": "Wages are not modeled. Dividend drag at 15%; cash "
-                   "interest and pre-retirement RMD/SS inflows taxed at this flat rate."},
+        {"label": "Roth vs. Traditional contributions",
+         "value": "split suggested (advisory)" if a.optimize_contribution_split
+                  else "as entered",
+         "kind": "modeled",
+         "source": "The projection always models the contributions you entered. "
+                   "When enabled, a single household Traditional/Roth split (the "
+                   "couple files jointly, so only the household ratio matters) is "
+                   "compared across levels on ending after-tax wealth — each split "
+                   "shown at its best, including its own optimal Roth conversions, "
+                   "so the RMD-vs-conversion tradeoff is reflected — and the best is "
+                   "shown as a suggestion; it is NOT applied to the projection "
+                   "('invest the tax savings': the Traditional deduction, valued "
+                   "at the real marginal bracket from salary, is reinvested in a "
+                   "taxable account). Contribution caps are vehicle-aware per "
+                   "person — IRC sec. 402(g) elective-deferral for 401(k)/403(b), "
+                   "IRC sec. 219 for IRAs (2026 values indexed at the inflation "
+                   "assumption) — and over-limit inputs are flagged, not capped. "
+                   "Roth IRA contributions above the MAGI phase-out are allowed "
+                   "but flagged as requiring a backdoor Roth; the pro-rata rule "
+                   "(IRC sec. 408(d)(2)) on existing pre-tax IRA balances and "
+                   "FICA are not modeled."},
+        {"label": "Pre-retirement income tax (with salary)",
+         "value": "modeled from wages" if any(p.salary > 0 for p in plan.persons)
+                  else "not entered (flat-rate drag only)",
+         "kind": "modeled",
+         "source": "When salaries are entered, working-year federal/state income "
+                   "tax is computed on wages plus pre-retirement inflows (less "
+                   "Traditional deferrals) using the same tax engine as "
+                   "retirement; wage tax is assumed paid from wages and does not "
+                   "draw down the portfolio. Dividend/cash-interest drag still "
+                   "applies separately. Wages grow at the inflation assumption."},
+        {"label": "Pre-retirement tax treatment",
+         "value": f"{fpct(a.pre_retirement_tax_rate)} flat drag",
+         "kind": "assumed",
+         "source": "The flat pre-retirement rate applies to the annual cash-"
+                   "interest drag and (when no salary is entered) to pre-retirement "
+                   "RMD/SS inflows; the dividend drag is a separate 15%. When a "
+                   "salary is entered, working-year income tax and those inflows are "
+                   "modeled with the full tax engine instead — see 'Pre-retirement "
+                   "income tax (with salary)'."},
         {"label": "Heir tax rate (terminal valuation)", "value": fpct(a.heir_tax_rate),
          "kind": "assumed", "source": "Discount on inherited tax-deferred/HSA dollars; "
                    "taxable assets assume basis step-up (IRC sec. 1014)."},
@@ -259,6 +422,7 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
         "Medicare Part B + IRMAA": "medicare_part_b",
         "ACA premium credit (pre-65)": "aca_applicable_pct",
         "RMDs": "rmd_ages",
+        "Roth vs. Traditional contributions": "contribution_limits",
     }
     freshness = {f["key"]: f for f in C.constants_freshness()}
     for note in notes:
@@ -282,11 +446,31 @@ def build_plan(plan: PlanInput) -> PlanResult:
         # re-resolve the conversion strategy under the optimized claim ages
         strategy, comparisons = resolve_strategy(plan, claim_ages)
 
+    # The contribution-split optimizer is ADVISORY: it suggests the best
+    # household Traditional-vs-Roth split but does NOT change the modeled plan,
+    # which always reflects the user's entered allocation. (SS claiming and Roth
+    # conversions still apply, since those are plan parameters, not "your input
+    # vs a suggestion".)
+    contribution_split: list[ContributionSplitCell] = []
+    chosen_split: list[float] = []
+    no_salary = not any(p.salary > 0 for p in plan.persons)
+    if plan.assumptions.optimize_contribution_split:
+        chosen_split, contribution_split = optimize_contribution_split(
+            plan, claim_ages)
+
     sim, rows, metrics = _run(plan, strategy, claim_ages)
+    metrics.chosen_contribution_split = chosen_split
     sens = sensitivity_scenarios(plan, strategy, claim_ages)
+
+    if plan.assumptions.optimize_contribution_split and contribution_split and no_salary:
+        sim.warnings.append(
+            "Traditional-vs-Roth optimization needs each working person's "
+            "salary to value the Traditional deduction; with no salary entered "
+            "the upfront tax benefit is ignored and the result favors Roth.")
 
     return PlanResult(metrics=metrics, years=rows, sensitivity=sens,
                       conversion_comparison=comparisons, ss_grid=ss_grid,
+                      contribution_split=contribution_split,
                       warnings=sim.warnings,
                       assumption_notes=assumption_notes(plan),
                       legacy=getattr(sim, "legacy", None))

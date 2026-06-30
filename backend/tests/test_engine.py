@@ -14,8 +14,10 @@ from app.engine.planner import build_plan
 from app.engine.taxes import (TaxYearInput, aca_applicable_pct, aca_subsidy,
                               compute_taxes, irmaa_tier,
                               taxable_social_security)
-from app.models import (Account, AccountType, Assumptions, ConversionStrategy,
-                        IncomeStream, Liability, Person, PlanInput)
+from app.engine.planner import SPLIT_LEVELS, apply_split
+from app.models import (Account, AccountType, AccountVehicle, Assumptions,
+                        ConversionStrategy, IncomeStream, Liability, Person,
+                        PlanInput)
 
 
 # ----------------------------------------------------------- federal tax
@@ -412,6 +414,65 @@ def test_purchase_year_records_home_purchase_outflow():
     assert by_year[2042].home_purchase == 0
 
 
+def _pre_retirement_buyer(**kw) -> PlanInput:
+    """A 50-yo who retires at 65, so a purchase before 65 lands in accumulation
+    (where the down payment competes with that year's contributions)."""
+    defaults = dict(
+        persons=[Person(name="Sam", current_age=50, retirement_age=65, death_age=90)],
+        accounts=[
+            Account(name="401(k)", type=AccountType.tax_deferred, owner=0,
+                    balance=500_000, annual_contribution=20_000, expected_return=0.05),
+            Account(name="Cash", type=AccountType.cash, owner=0, balance=5_000,
+                    annual_contribution=0, expected_return=0.04),
+            Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                    balance=5_000, cost_basis=5_000, annual_contribution=0,
+                    expected_return=0.05),
+        ],
+        annual_spending=40_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none,
+                                inflation=0.025,
+                                contributions_grow_with_inflation=False),
+    )
+    defaults.update(kw)
+    return PlanInput(**defaults)
+
+
+def test_pre_retirement_down_payment_raids_tax_advantaged_warns():
+    # A $100k down payment at age 55 (2031) dwarfs cash+taxable (~$10k), so the
+    # waterfall must raid the 401(k) — pre-59.5, so a penalty applies.
+    plan = _pre_retirement_buyer(liabilities=[Liability(
+        name="Future home", balance=0, interest_rate=0.0,
+        annual_payment=0, start_age=55, down_payment=100_000)])
+    sim = Simulator(plan, strategy=ConversionStrategy.none)
+    rows, _ = sim.run()
+    # the actionable plan-level warning fires exactly once
+    raid = [w for w in sim.warnings if "down payment in 2031" in w]
+    assert len(raid) == 1
+    assert "tax-advantaged" in raid[0] and "not reduced" in raid[0]
+    assert "early-withdrawal penalty" in raid[0]  # pre-59.5 raid is penalized
+    # contributions are NOT reduced: the buy-year 401(k) contribution is still
+    # the full entered $20k (growth-with-inflation is off in this fixture)
+    buy = next(y for y in rows if y.year == 2031)
+    k401 = next(a for a in buy.accounts if a.name == "401(k)")
+    assert math.isclose(k401.contribution, 20_000, abs_tol=0.01)
+
+
+def test_down_payment_covered_by_cash_raises_no_raid_warning():
+    # Same purchase, but ample cash fully funds it — no tax-advantaged raid.
+    plan = _pre_retirement_buyer(
+        accounts=[
+            Account(name="401(k)", type=AccountType.tax_deferred, owner=0,
+                    balance=500_000, annual_contribution=20_000, expected_return=0.05),
+            Account(name="Cash", type=AccountType.cash, owner=0, balance=300_000,
+                    annual_contribution=0, expected_return=0.04),
+        ],
+        liabilities=[Liability(name="Future home", balance=0, interest_rate=0.0,
+                               annual_payment=0, start_age=55, down_payment=100_000)])
+    sim = Simulator(plan, strategy=ConversionStrategy.none)
+    sim.run()
+    assert not any("down payment in 2031" in w for w in sim.warnings)
+
+
 def test_existing_liability_backward_compatible():
     # start_age=None must behave exactly like the pre-feature liability.
     liab = dict(name="Mortgage", balance=200_000, interest_rate=0.04,
@@ -534,3 +595,272 @@ def test_income_stream_stops_at_death_without_survivor():
     by = {y.year: y for y in rows}
     assert math.isclose(by[2060].other_income, 40_000, abs_tol=1)
     assert by[2064].other_income == 0.0  # Sam dead -> nothing continues
+# -------------------------------- surplus reinvestment conservation (regression)
+def test_no_phantom_surplus_from_rmds():
+    # Regression: forced RMDs were double-counted as available resources in the
+    # retirement surplus calc (once as rmd_total, once inside withdrawals_by_type),
+    # minting phantom money in high-RMD years. Per-year wealth must be conserved:
+    # end = start + growth - (spend+healthcare+tax+debt+home) + (ss+other).
+    plan = PlanInput(
+        persons=[Person(name="Rich", current_age=72, retirement_age=73, death_age=92,
+                        ss_monthly_at_fra=3000, ss_claim_age=70)],
+        accounts=[Account(name="Big 401k", type=AccountType.tax_deferred, owner=0,
+                          balance=3_000_000, annual_contribution=0, expected_return=0.06),
+                  Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                          balance=100_000, cost_basis=100_000, annual_contribution=0)],
+        annual_spending=80_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none))
+    rows, m = Simulator(plan, strategy=ConversionStrategy.none).run()
+    ret = [y for y in rows if y.phase == "retirement"]
+    assert any(y.rmd_total > 80_000 for y in ret)  # genuinely large forced RMDs
+    assert not m.depleted
+    for y in ret:
+        start = sum(a.start_balance for a in y.accounts)
+        growth = sum(a.growth for a in y.accounts)
+        end = sum(a.end_balance for a in y.accounts)
+        outflow = y.spend_goal + y.healthcare_cost + y.total_tax \
+            + y.debt_payments + y.home_purchase
+        inflow = y.ss_total + y.other_income
+        assert math.isclose(end, start + growth - outflow + inflow,
+                            rel_tol=0.01, abs_tol=1500), f"{y.year}"
+
+
+# --------------------------------- Roth-vs-Traditional contribution split
+def _saver(salary, roth_c=10_000, td_c=10_000, **akw):
+    a = dict(roth_conversion_strategy=ConversionStrategy.none,
+             optimize_contribution_split=True)
+    a.update(akw)
+    return PlanInput(
+        persons=[Person(name="Jo", current_age=40, retirement_age=65, death_age=90,
+                        ss_monthly_at_fra=2500, ss_claim_age=67, salary=salary)],
+        accounts=[
+            Account(name="401k", type=AccountType.tax_deferred, owner=0,
+                    vehicle=AccountVehicle.employer, balance=200_000,
+                    annual_contribution=td_c, expected_return=0.06),
+            Account(name="Roth 401k", type=AccountType.roth, owner=0,
+                    vehicle=AccountVehicle.employer, balance=50_000,
+                    annual_contribution=roth_c, expected_return=0.06),
+            Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                    balance=50_000, cost_basis=50_000, annual_contribution=0,
+                    expected_return=0.06),
+        ],
+        annual_spending=70_000, assumptions=Assumptions(**a))
+
+
+def test_split_low_bracket_favors_roth():
+    # A low current bracket means paying tax now (Roth) beats deferring it.
+    r = build_plan(_saver(salary=40_000))
+    assert r.metrics.chosen_contribution_split == [1.0]
+
+
+def test_split_high_bracket_favors_traditional():
+    # A high current bracket makes the deduction worth more than tax-free growth.
+    r = build_plan(_saver(salary=300_000))
+    assert r.metrics.chosen_contribution_split == [0.0]
+
+
+def test_split_reports_all_candidates_and_marks_current():
+    r = build_plan(_saver(salary=90_000))
+    assert len(r.contribution_split) >= len(SPLIT_LEVELS)
+    pcts = {round(c.roth_pct[0], 2) for c in r.contribution_split}
+    assert {0.0, 0.5, 1.0} <= pcts
+    # current allocation is 10k/20k = 50% Roth and must be flagged exactly once
+    current = [c for c in r.contribution_split if c.is_current]
+    assert len(current) == 1 and current[0].roth_pct == [0.5]
+
+
+def test_invest_the_tax_savings_reinvested():
+    # The Traditional deduction's tax saving is reinvested in taxable; Roth has
+    # no deduction, so nothing is reinvested during accumulation.
+    plan = _saver(salary=200_000)
+    trad = Simulator(apply_split(plan, [0.0]), strategy=ConversionStrategy.none).run()[0]
+    roth = Simulator(apply_split(plan, [1.0]), strategy=ConversionStrategy.none).run()[0]
+    acc_trad = sum(y.surplus_reinvested for y in trad if y.phase == "accumulation")
+    acc_roth = sum(y.surplus_reinvested for y in roth if y.phase == "accumulation")
+    assert acc_roth == 0
+    assert acc_trad > 0
+
+
+def test_salary_populates_accumulation_tax_fields():
+    plan = _saver(salary=150_000, optimize_contribution_split=False)
+    rows = Simulator(plan, strategy=ConversionStrategy.none).run()[0]
+    acc = [y for y in rows if y.phase == "accumulation"]
+    assert acc and all(y.agi > 0 and y.federal_tax > 0 and y.marginal_rate > 0
+                       for y in acc)
+
+
+def test_no_salary_keeps_legacy_flat_path():
+    # Backward compatibility: with no salary the legacy flat-rate accumulation
+    # path runs and the new income-tax fields stay unpopulated.
+    plan = _saver(salary=0, optimize_contribution_split=False)
+    rows = Simulator(plan, strategy=ConversionStrategy.none).run()[0]
+    acc = [y for y in rows if y.phase == "accumulation"]
+    assert acc and all(y.agi == 0 and y.federal_tax == 0 and y.taxable_income == 0
+                       for y in acc)
+
+
+def _one_account_plan(acct: Account, salary=120_000) -> PlanInput:
+    return PlanInput(
+        persons=[Person(name="Jo", current_age=40, retirement_age=65,
+                        death_age=90, salary=salary)],
+        accounts=[acct, Account(name="Tx", type=AccountType.taxable, owner=0,
+                                balance=10_000, cost_basis=10_000)],
+        annual_spending=60_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none))
+
+
+def test_employer_vehicle_uses_elective_not_ira_limit():
+    # $20k is fine in a 401k (under the elective-deferral limit) but exceeds the
+    # IRA limit — the cap must follow the vehicle, not assume IRA.
+    emp = build_plan(_one_account_plan(Account(
+        name="401k", type=AccountType.tax_deferred, owner=0,
+        vehicle=AccountVehicle.employer, balance=100_000,
+        annual_contribution=20_000, expected_return=0.06)))
+    ira = build_plan(_one_account_plan(Account(
+        name="IRA", type=AccountType.tax_deferred, owner=0,
+        vehicle=AccountVehicle.ira, balance=100_000,
+        annual_contribution=20_000, expected_return=0.06)))
+    assert not any("exceed" in w for w in emp.warnings)
+    assert any("IRA contribution limit" in w for w in ira.warnings)
+
+
+def test_backdoor_roth_flagged_for_high_earner():
+    # High MAGI + a Roth IRA contribution -> allowed but flagged as a backdoor;
+    # a Roth 401(k) at the same income has no income limit, so no flag.
+    ira = build_plan(_one_account_plan(Account(
+        name="Roth IRA", type=AccountType.roth, owner=0,
+        vehicle=AccountVehicle.ira, balance=50_000,
+        annual_contribution=7_000, expected_return=0.06), salary=400_000))
+    emp = build_plan(_one_account_plan(Account(
+        name="Roth 401k", type=AccountType.roth, owner=0,
+        vehicle=AccountVehicle.employer, balance=50_000,
+        annual_contribution=7_000, expected_return=0.06), salary=400_000))
+    assert any("backdoor" in w.lower() for w in ira.warnings)
+    assert not any("backdoor" in w.lower() for w in emp.warnings)
+
+
+def test_split_optimizer_is_advisory_not_applied():
+    # The suggestion must NOT change the modeled projection. With a high salary
+    # the optimizer suggests all-Traditional, yet the plan must still reflect the
+    # entered 50/50 split — i.e. the same ending wealth as running the input.
+    plan = _saver(salary=300_000)  # 10k Roth + 10k Trad; suggestion will be 0% Roth
+    r = build_plan(plan)
+    assert r.metrics.chosen_contribution_split == [0.0]
+    direct = Simulator(plan, strategy=ConversionStrategy.none).run()[1]
+    assert math.isclose(r.metrics.ending_after_tax_real,
+                        direct.ending_after_tax_real, rel_tol=1e-9)
+
+
+def test_split_suggestion_is_single_household_value():
+    # A couple gets ONE suggested household split, not a per-person breakdown.
+    plan = PlanInput(
+        persons=[Person(name="A", current_age=40, retirement_age=65,
+                        death_age=90, salary=120_000),
+                 Person(name="B", current_age=40, retirement_age=65,
+                        death_age=90, salary=120_000)],
+        accounts=[
+            Account(name="A 401k", type=AccountType.tax_deferred, owner=0,
+                    vehicle=AccountVehicle.employer, balance=100_000,
+                    annual_contribution=15_000),
+            Account(name="A Roth", type=AccountType.roth, owner=0,
+                    vehicle=AccountVehicle.ira, balance=20_000,
+                    annual_contribution=5_000),
+            Account(name="B 401k", type=AccountType.tax_deferred, owner=1,
+                    vehicle=AccountVehicle.employer, balance=80_000,
+                    annual_contribution=10_000),
+            Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                    balance=20_000, cost_basis=20_000),
+        ],
+        annual_spending=70_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none,
+                                optimize_contribution_split=True))
+    r = build_plan(plan)
+    assert len(r.metrics.chosen_contribution_split) == 1
+    assert all(len(c.roth_pct) == 1 for c in r.contribution_split)
+    assert any(c.is_current for c in r.contribution_split)
+
+
+def test_split_cells_pair_each_split_with_best_conversions():
+    # Each split is shown at its best, including the Roth-conversion lever. In a
+    # large-tax-deferred household, the all-Traditional split should lean on
+    # conversions (a non-'none' strategy) to defuse later RMDs — even though the
+    # user's conversion toggle is OFF (the table always shows best-case).
+    plan = PlanInput(
+        persons=[Person(name="A", current_age=50, retirement_age=63, death_age=92,
+                        ss_monthly_at_fra=2600, ss_claim_age=70, salary=110_000),
+                 Person(name="B", current_age=50, retirement_age=63, death_age=92,
+                        ss_monthly_at_fra=2000, ss_claim_age=70, salary=90_000)],
+        accounts=[
+            Account(name="A 401k", type=AccountType.tax_deferred, owner=0,
+                    vehicle=AccountVehicle.employer, balance=1_500_000,
+                    annual_contribution=15_000),
+            Account(name="A Roth 401k", type=AccountType.roth, owner=0,
+                    vehicle=AccountVehicle.employer, balance=60_000,
+                    annual_contribution=8_000),
+            Account(name="B 401k", type=AccountType.tax_deferred, owner=1,
+                    vehicle=AccountVehicle.employer, balance=900_000,
+                    annual_contribution=12_000),
+            Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                    balance=120_000, cost_basis=120_000),
+        ],
+        annual_spending=110_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none,
+                                optimize_contribution_split=True))
+    r = build_plan(plan)
+    assert all(c.conversion_strategy for c in r.contribution_split)
+    all_trad = next(c for c in r.contribution_split if round(c.roth_pct[0], 2) == 0.0)
+    assert all_trad.conversion_strategy != "none"   # leans on conversions vs RMDs
+    # headline is unaffected by the table's best-case conversions (toggle is none)
+    direct = Simulator(plan, strategy=ConversionStrategy.none).run()[1]
+    assert math.isclose(r.metrics.ending_after_tax_real,
+                        direct.ending_after_tax_real, rel_tol=1e-9)
+
+
+def test_apply_split_preserves_vehicle_totals():
+    plan = _saver(salary=100_000)  # 10k Roth + 10k Trad in the employer bucket
+    for pct in (0.0, 0.5, 1.0):
+        p2 = apply_split(plan, [pct])
+        emp = [a for a in p2.accounts if a.owner == 0
+               and a.type in (AccountType.tax_deferred, AccountType.roth)
+               and a.limit_vehicle() == AccountVehicle.employer]
+        assert math.isclose(sum(a.annual_contribution for a in emp), 20_000, abs_tol=1)
+        roth = sum(a.annual_contribution for a in emp if a.type == AccountType.roth)
+        assert math.isclose(roth, 20_000 * pct, abs_tol=1)
+
+
+def test_limit_warning_not_duplicated_per_year():
+    # Regression: the message embedded {year}, so one over-limit input spammed a
+    # separate warning for every accumulation year. It must appear exactly once.
+    plan = _one_account_plan(Account(
+        name="Overfunded 401k", type=AccountType.tax_deferred, owner=0,
+        vehicle=AccountVehicle.employer, balance=100_000,
+        annual_contribution=40_000, expected_return=0.06))
+    r = build_plan(plan)
+    elective = [w for w in r.warnings if "elective-deferral" in w]
+    assert len(elective) == 1
+
+
+def test_untagged_roth_defaults_to_ira_not_employer():
+    # Regression: an untagged Roth account (vehicle=None) was treated as an
+    # employer Roth 401(k) and lumped into the 401(k) elective-deferral bucket
+    # with a real 401(k), producing a false over-limit warning. It must default
+    # to a Roth IRA instead.
+    plan = PlanInput(
+        persons=[Person(name="Briar", current_age=40, retirement_age=65,
+                        death_age=90, salary=120_000)],
+        accounts=[
+            Account(name="401k", type=AccountType.tax_deferred, owner=0,
+                    vehicle=AccountVehicle.employer, balance=200_000,
+                    annual_contribution=20_000),
+            Account(name="Roth IRA", type=AccountType.roth, owner=0,  # vehicle=None
+                    balance=50_000, annual_contribution=7_000),
+            Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                    balance=10_000, cost_basis=10_000),
+        ],
+        annual_spending=60_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none))
+    r = build_plan(plan)
+    # 20k employer + 7k IRA, correctly bucketed, are each under their own cap.
+    assert not any("elective-deferral" in w for w in r.warnings)
+    assert Account(name="x", type=AccountType.roth, owner=0, balance=0)\
+        .limit_vehicle() == AccountVehicle.ira

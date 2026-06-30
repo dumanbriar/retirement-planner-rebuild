@@ -1,6 +1,6 @@
 import { Plus, Trash2 } from "lucide-react";
-import type { Account, AccountType } from "../../lib/types";
-import { ACCOUNT_TYPE_LABELS, DEFAULT_RETURNS } from "../../lib/types";
+import type { Account, AccountType, AccountVehicle } from "../../lib/types";
+import { ACCOUNT_TYPE_LABELS, ACCOUNT_VEHICLE_LABELS, DEFAULT_RETURNS } from "../../lib/types";
 import { newAccount } from "../../lib/sample";
 import {
   NumberField,
@@ -17,6 +17,11 @@ const TYPE_OPTIONS = (Object.keys(ACCOUNT_TYPE_LABELS) as AccountType[]).map((t)
   label: ACCOUNT_TYPE_LABELS[t],
 }));
 
+const VEHICLE_OPTIONS = (Object.keys(ACCOUNT_VEHICLE_LABELS) as AccountVehicle[]).map((v) => ({
+  value: v,
+  label: ACCOUNT_VEHICLE_LABELS[v],
+}));
+
 export function AccountsSection({ input, onChange, errors, dense }: SectionProps) {
   const ownerOptions = input.persons.map((p, i) => ({ value: i, label: p.name || `Person ${i + 1}` }));
 
@@ -24,11 +29,15 @@ export function AccountsSection({ input, onChange, errors, dense }: SectionProps
     onChange({ ...input, accounts: updateAt(input.accounts, i, patch) });
 
   const setType = (i: number, type: AccountType) => {
-    // Prefill the expected return with the type default (6/6/6/5/4).
+    // Prefill the expected return with the type default (6/6/6/5/4) and a
+    // sensible contribution-limit vehicle: Roth -> IRA (a Roth IRA is far more
+    // common than a Roth 401k), tax-deferred -> employer plan.
     setAccount(i, {
       type,
       expected_return: DEFAULT_RETURNS[type],
       cost_basis: type === "taxable" ? input.accounts[i].cost_basis : null,
+      vehicle:
+        type === "roth" ? "ira" : type === "tax_deferred" ? "employer" : input.accounts[i].vehicle,
     });
   };
 
@@ -58,6 +67,16 @@ export function AccountsSection({ input, onChange, errors, dense }: SectionProps
                 className={dense ? "" : "lg:col-span-3"}
                 help="Drives tax treatment: tax-deferred is taxed as ordinary income on withdrawal (with RMDs); Roth withdrawals are tax-free; taxable pays dividend/capital-gains tax; HSA is tax-free for medical; cash interest is taxed annually."
               />
+              {(a.type === "tax_deferred" || a.type === "roth") && (
+                <SelectField
+                  label="Vehicle"
+                  value={a.vehicle ?? (a.type === "roth" ? "ira" : "employer")}
+                  onChange={(vehicle) => setAccount(i, { vehicle })}
+                  options={VEHICLE_OPTIONS}
+                  className={dense ? "" : "lg:col-span-2"}
+                  help="Which IRS contribution limit applies: employer plans (401k/403b) allow far larger contributions than IRAs. Also decides whether the Roth IRA income limit applies (a backdoor Roth is flagged above it). Does not change how withdrawals are taxed."
+                />
+              )}
               <SelectField
                 label="Owner"
                 value={a.owner}

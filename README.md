@@ -9,14 +9,34 @@ screen is reproducible from the exported Excel workbook.
 
 - **Frontend**: React + Vite + TypeScript + Tailwind + Recharts (deployed to Vercel)
 - **Backend**: Python FastAPI projection engine (deployed to Railway)
-- No accounts, no logins, no stored data — inputs live in the advisor's browser.
+- No accounts, no logins, no server-side storage (see **Data & privacy** below).
+
+## Data & privacy
+
+Inputs you enter are saved **only in your browser** (`localStorage`) and are sent
+to the projection engine over HTTPS **solely to compute** the plan and the Excel
+workbook. The engine is **stateless**: it holds the data in memory for the
+request, returns the result, and keeps nothing — no database, no file writes, no
+logging of inputs, and no analytics or third-party calls (the whole backend
+dependency set is FastAPI / uvicorn / openpyxl / pydantic / slowapi). API requests
+go from the browser **directly to the engine**, not through the static host.
+"Reset to sample data" clears the local copy; on a shared computer the saved plan
+persists in that browser until cleared.
 
 ## What it models
 
 **Accumulation** (until every household member reaches their retirement age):
 per-account contributions, configurable expected returns, annual tax drag on
 taxable dividends (15%) and cash interest (flat pre-retirement rate), forced
-RMDs, and liabilities amortizing on schedule.
+RMDs, and liabilities amortizing on schedule. When a salary is entered,
+working-year federal/state income tax is computed from wages, and the
+**Traditional-vs-Roth contribution split** can be optimized: each person's
+contribution is held constant, the Traditional deduction is valued at the real
+marginal bracket and its tax saving reinvested in taxable ("invest the tax
+savings"), and splits are exhaustively compared on ending after-tax wealth.
+Contribution limits are vehicle-aware per person (401(k)/403(b)
+elective-deferral vs IRA); Roth-IRA contributions above the income limit are
+flagged as requiring a backdoor Roth.
 
 **Retirement** (year by year until the configured plan-end age):
 - Withdrawal sequencing: cash → taxable → tax-deferred → Roth → HSA, with the
@@ -68,15 +88,21 @@ RMDs, and liabilities amortizing on schedule.
 | NIIT | IRC §1411 |
 | HSA rules | IRC §223; IRS Pub. 969 |
 | Basis step-up at death | IRC §1014 |
+| 2026 contribution limits & Roth-IRA MAGI phase-out | IRS Notice 2025-67; IRC §402(g), §219, §408A |
 
 ## Documented simplifications
 
 These are deliberate, visible modeling choices (also listed in the workbook):
 - Deterministic annual compounding; no return volatility (sensitivity
   scenarios bound the range instead of Monte Carlo).
-- Wages are not modeled: pre-retirement spending/debt service is assumed
-  covered by employment income; pre-retirement investment income is taxed at
-  flat rates; household drawdown begins when **both** spouses are retired.
+- Wages are modeled only when a salary is entered (to value the
+  Traditional-vs-Roth deduction and working-year income tax); otherwise they
+  are not and pre-retirement investment income is taxed at flat rates. Either
+  way, pre-retirement spending/debt service is assumed covered by employment
+  income, and household drawdown begins when **both** spouses are retired.
+  FICA is not modeled (it doesn't change the deferral decision), the
+  backdoor-Roth pro-rata rule (IRC §408(d)(2)) is not modeled, and
+  contributions above IRS limits are flagged rather than capped.
 - Brackets/IRMAA/FPL index at the plan inflation assumption (IRS uses
   chained CPI with $25/$50 rounding).
 - One inflation assumption serves as SS COLA proxy; PIA estimates are

@@ -6,7 +6,8 @@ Sheets:
   3. Accumulation     - per-year per-account flows until retirement
   4. Retirement       - full cash-flow & tax detail for every retired year
   5. Account Detail   - start/contrib/withdraw/convert/growth/end per account-year
-  6. Strategies       - Roth-conversion comparison + SS claiming grid
+  6. Strategies       - Roth-conversion comparison, SS claiming grid,
+                        Traditional-vs-Roth contribution split
   7. Legacy & Estate  - what each asset passes to heirs vs charity, net of tax
   8. Sensitivity      - scenario table
 """
@@ -291,6 +292,31 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
             vals = list(cell_.claim_ages) + [cell_.ending_after_tax_real,
                                              cell_.depletion_age or "",
                                              "<= chosen" if cell_.claim_ages == m.ss_claim_ages else ""]
+            for c, v in enumerate(vals, 1):
+                xc = ws.cell(row=r, column=c, value=v)
+                if isinstance(v, float):
+                    xc.number_format = MONEY
+            r += 1
+    if result.contribution_split:
+        r += 2
+        ws.cell(row=r, column=1,
+                value="Traditional vs. Roth contribution split — advisory "
+                      "suggestion (objective: ending after-tax wealth, today's "
+                      "$). The projection models the contributions as entered."
+                      ).font = TITLE_FONT
+        r += 1
+        _sheet_header(ws, r, ["Household % to Roth", "Best Roth conversions",
+                              "Ending after-tax wealth (today's $)",
+                              "Lifetime taxes (today's $)", "Depleted at age",
+                              "Current", "Suggested"])
+        r += 1
+        chosen = round(m.chosen_contribution_split[0], 4) if m.chosen_contribution_split else None
+        for cell_ in result.contribution_split:
+            vals = [round(cell_.roth_pct[0] * 100), cell_.conversion_strategy,
+                    cell_.ending_after_tax_real, cell_.lifetime_taxes_real,
+                    cell_.depletion_age or "",
+                    "current" if cell_.is_current else "",
+                    "<= suggested" if round(cell_.roth_pct[0], 4) == chosen else ""]
             for c, v in enumerate(vals, 1):
                 xc = ws.cell(row=r, column=c, value=v)
                 if isinstance(v, float):

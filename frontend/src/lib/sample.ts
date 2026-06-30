@@ -12,6 +12,7 @@ export const DEFAULT_ASSUMPTIONS: Assumptions = {
   roth_conversion_strategy: "auto",
   custom_conversion_amount: 0,
   optimize_ss_claiming: false,
+  optimize_contribution_split: false,
   aca_benchmark_monthly_per_person: 850,
   pre65_oop_annual_per_person: 2500,
   medicare_other_annual_per_person: 3500,
@@ -28,6 +29,7 @@ export const SAMPLE_INPUT: PlanInput = {
       death_age: 92,
       ss_monthly_at_fra: 2800,
       ss_claim_age: 67,
+      salary: 180_000,
     },
     {
       name: "Alex",
@@ -36,6 +38,7 @@ export const SAMPLE_INPUT: PlanInput = {
       death_age: 94,
       ss_monthly_at_fra: 1900,
       ss_claim_age: 67,
+      salary: 110_000,
     },
   ],
   accounts: [
@@ -43,15 +46,17 @@ export const SAMPLE_INPUT: PlanInput = {
       name: "Sam 401(k)",
       type: "tax_deferred",
       owner: 0,
+      vehicle: "employer",
       balance: 850_000,
       cost_basis: null,
-      annual_contribution: 30_000,
+      annual_contribution: 23_000,
       expected_return: 0.06,
     },
     {
       name: "Alex 403(b)",
       type: "tax_deferred",
       owner: 1,
+      vehicle: "employer",
       balance: 310_000,
       cost_basis: null,
       annual_contribution: 15_000,
@@ -61,6 +66,7 @@ export const SAMPLE_INPUT: PlanInput = {
       name: "Roth IRA",
       type: "roth",
       owner: 0,
+      vehicle: "ira",
       balance: 120_000,
       cost_basis: null,
       annual_contribution: 7_000,
@@ -99,7 +105,12 @@ export const SAMPLE_INPUT: PlanInput = {
   ],
   income_streams: [],
   annual_spending: 96_000,
-  assumptions: { ...DEFAULT_ASSUMPTIONS, roth_conversion_strategy: "auto", optimize_ss_claiming: true },
+  assumptions: {
+    ...DEFAULT_ASSUMPTIONS,
+    roth_conversion_strategy: "auto",
+    optimize_ss_claiming: true,
+    optimize_contribution_split: true,
+  },
 };
 
 export function newPerson(index: number): Person {
@@ -110,6 +121,7 @@ export function newPerson(index: number): Person {
     death_age: 90,
     ss_monthly_at_fra: 0,
     ss_claim_age: 67,
+    salary: 0,
   };
 }
 
@@ -118,6 +130,7 @@ export function newAccount(): Account {
     name: "New account",
     type: "tax_deferred",
     owner: 0,
+    vehicle: "employer",
     balance: 0,
     cost_basis: null,
     annual_contribution: 0,
