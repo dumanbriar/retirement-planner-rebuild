@@ -26,6 +26,7 @@ import { LiabilitiesSection } from "./LiabilitiesSection";
 import { IncomeStreamsSection } from "./IncomeStreamsSection";
 import { SpendingSection } from "./SpendingSection";
 import { AssumptionsSection } from "./AssumptionsSection";
+import { PlanIO } from "./PlanIO";
 
 interface SidebarProps {
   input: PlanInput;
@@ -214,7 +215,8 @@ export function Sidebar({
           <AssumptionsSection {...sectionProps} />
         </SectionAccordion>
 
-        <div className="px-4 py-3">
+        <div className="space-y-2 px-4 py-3">
+          <PlanIO input={input} onImport={onChange} />
           <button
             type="button"
             onClick={onReset}

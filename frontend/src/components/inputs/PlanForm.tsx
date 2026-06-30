@@ -8,6 +8,7 @@ import { LiabilitiesSection } from "./LiabilitiesSection";
 import { IncomeStreamsSection } from "./IncomeStreamsSection";
 import { SpendingSection } from "./SpendingSection";
 import { AssumptionsSection } from "./AssumptionsSection";
+import { PlanIO } from "./PlanIO";
 
 export function PlanForm({
   input,
@@ -116,13 +117,16 @@ export function PlanForm({
             </>
           )}
         </button>
-        <button
-          type="button"
-          onClick={onReset}
-          className="inline-flex items-center gap-1 text-xs font-medium text-slate-400 transition-colors hover:text-brand-700"
-        >
-          <RotateCcw className="h-3 w-3" /> Reset to sample data (Sam & Alex)
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={onReset}
+            className="inline-flex items-center gap-1 text-xs font-medium text-slate-400 transition-colors hover:text-brand-700"
+          >
+            <RotateCcw className="h-3 w-3" /> Reset to sample data (Sam & Alex)
+          </button>
+          <PlanIO input={input} onImport={onChange} />
+        </div>
       </div>
     </div>
   );
