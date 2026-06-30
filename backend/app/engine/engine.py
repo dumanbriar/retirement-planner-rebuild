@@ -105,17 +105,20 @@ class SimAnnuity:
     def __init__(self, spec: Annuity):
         self.spec = spec
         self.owner = spec.owner
-        self.balance = spec.balance
-        self.basis = spec.basis            # remaining un-recovered basis
-        self.active = True
+        future = spec.purchase_age is not None
+        self.purchased = not future        # already owned vs planned future buy
+        self.active = not future           # dormant until purchased
+        self.balance = 0.0 if future else spec.balance
+        self.basis = 0.0 if future else spec.basis  # remaining un-recovered basis
         self.annuitized = False
         self.payment = 0.0                 # level annual payout once annuitized
         self.excluded = 0.0                # basis returned tax-free per payout year
         self.payout_left = 0
         # per-year reporting scratch
-        self.start_balance = spec.balance
+        self.start_balance = self.balance
         self.growth = 0.0
         self.payout = 0.0
+        self.contribution = 0.0            # lump sum in the purchase year
 
     @property
     def rate(self) -> float:
@@ -165,6 +168,7 @@ class Simulator:
         self._death_benefit_paid_year = 0.0
         self._annuity_payout = 0.0       # total annuity payments this year (cash)
         self._annuity_taxable = 0.0      # ordinary (gain) portion of those payments
+        self._annuity_purchase = 0.0     # lump sum to fund a planned annuity buy
 
         self.accounts = [SimAccount(s) for s in plan.accounts]
         if not any(x.spec.type in (AccountType.taxable, AccountType.cash)
@@ -558,7 +562,7 @@ class Simulator:
             # deferred annuities (accumulation value, or remaining payout value)
             row.accounts += [AccountYear(
                 name=a.spec.name, type=None, owner=a.owner,
-                start_balance=a.start_balance, contribution=0.0,
+                start_balance=a.start_balance, contribution=a.contribution,
                 withdrawal=0.0, distribution=a.payout, growth=a.growth,
                 end_balance=a.balance, cost_basis=a.basis,
                 asset_class="annuity",
@@ -726,13 +730,27 @@ class Simulator:
         Sets self._annuity_payout (cash) and self._annuity_taxable (ordinary)."""
         self._annuity_payout = 0.0
         self._annuity_taxable = 0.0
+        self._annuity_purchase = 0.0
         for a in self.annuities:
             a.start_balance = a.balance
             a.growth = 0.0
             a.payout = 0.0
-            if not a.active or not self.alive(a.owner, year):
+            a.contribution = 0.0
+            if not self.alive(a.owner, year):
                 continue
             age = self.age(a.owner, year)
+            # planned future purchase: fund a lump sum from the portfolio (the
+            # outflow is added to this year's need / waterfall draw) and start
+            # the contract at that value with a full after-tax basis.
+            if not a.purchased and age >= a.spec.purchase_age:
+                a.balance = a.spec.purchase_amount
+                a.basis = a.spec.purchase_amount
+                a.contribution = a.spec.purchase_amount
+                a.active = True
+                a.purchased = True
+                self._annuity_purchase += a.spec.purchase_amount
+            if not a.active:
+                continue
             if not a.annuitized:
                 # accumulate tax-deferred
                 a.growth = a.balance * a.rate
@@ -855,6 +873,15 @@ class Simulator:
                     "before the purchase.")
                 if msg not in self.warnings:
                     self.warnings.append(msg)
+
+        # a planned annuity purchase before household retirement: fund the lump
+        # sum from the portfolio (same waterfall as a home down payment).
+        if self._annuity_purchase > 0:
+            pen_before = scratch.penalties
+            got = self.waterfall_withdraw(self._annuity_purchase, scratch, year)
+            row.total_tax += scratch.penalties - pen_before
+            if got + 1 < self._annuity_purchase:
+                row.shortfall += self._annuity_purchase - got
 
         self._check_contribution_limits(year, row)
         row.withdrawals_by_type = scratch.withdrawals_by_type
@@ -1064,7 +1091,8 @@ class Simulator:
 
             # 4) cover remaining need from the waterfall
             need = (spend_goal + debt_payments + home_purchase + healthcare_net
-                    + tax_guess + self.annual_gifts(year) + self._ins_premium)
+                    + tax_guess + self.annual_gifts(year) + self._ins_premium
+                    + self._annuity_purchase)
             resources = (ss_total + other_taxable + other_nontaxable + rmd_total
                          + self._annuity_payout)
             gap = need + scratch.penalties - resources
@@ -1109,7 +1137,7 @@ class Simulator:
         # distributions and mints phantom surplus in high-RMD years.
         need = (spend_goal + debt_payments + home_purchase + healthcare_net
                 + tax_guess + scratch.penalties + self.annual_gifts(year)
-                + self._ins_premium)
+                + self._ins_premium + self._annuity_purchase)
         resources = (ss_total + other_taxable + other_nontaxable
                      + self._annuity_payout
                      + sum(scratch.withdrawals_by_type.values()))

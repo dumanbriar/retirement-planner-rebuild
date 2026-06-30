@@ -196,5 +196,7 @@ export function newAnnuity(): Annuity {
     accumulation_return: 0.04,
     annuitize_at_age: 70,
     payout_years: 20,
+    purchase_age: null,
+    purchase_amount: 0,
   };
 }

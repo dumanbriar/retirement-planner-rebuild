@@ -119,6 +119,10 @@ export interface Annuity {
   accumulation_return: number; // assumed growth rate
   annuitize_at_age: number; // 50..90
   payout_years: number; // 1..40
+  /** Planned future purchase: age to buy (null => already owned today). */
+  purchase_age: number | null;
+  /** Lump sum drawn from the portfolio at purchase_age (nominal). */
+  purchase_amount: number;
 }
 
 /** How an asset is taxed when it passes to its beneficiary at death. */

@@ -154,11 +154,17 @@ class Annuity(BaseModel):
     Amounts are nominal. At death the remaining gain is IRD (no step-up, §691)."""
     name: str = "Deferred annuity"
     owner: int = Field(default=0, ge=0, le=1)
-    balance: float = Field(ge=0)                 # current accumulation value, nominal
+    balance: float = Field(default=0, ge=0)      # current accumulation value, nominal
     basis: float = Field(default=0, ge=0)        # after-tax premiums paid (exclusion basis)
     accumulation_return: float = Field(default=0.04, ge=-0.10, le=0.20)  # assumed
     annuitize_at_age: int = Field(ge=50, le=90)
     payout_years: int = Field(default=20, ge=1, le=40)  # period-certain payout length
+    # Future (planned) purchase: when set, the annuity is dormant until the owner
+    # reaches purchase_age, at which point a one-time purchase_amount is drawn from
+    # the portfolio (nominal) and becomes the contract value and its (after-tax)
+    # basis. None => the annuity is already owned today (uses balance/basis above).
+    purchase_age: Optional[int] = Field(default=None, ge=40, le=90)
+    purchase_amount: float = Field(default=0, ge=0)
 
 
 class ConversionStrategy(str, Enum):

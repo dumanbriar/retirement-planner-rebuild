@@ -1,7 +1,13 @@
 import { Plus, Trash2 } from "lucide-react";
 import type { Annuity } from "../../lib/types";
 import { newAnnuity } from "../../lib/sample";
-import { NumberField, PercentField, SelectField, TextField } from "../ui/fields";
+import {
+  CheckboxField,
+  NumberField,
+  PercentField,
+  SelectField,
+  TextField,
+} from "../ui/fields";
 import { removeAt, type SectionProps, updateAt } from "./sectionProps";
 import { ModelingDisclosure } from "./ModelingDisclosure";
 
@@ -38,24 +44,49 @@ export function AnnuitiesSection({ input, onChange, errors, dense }: SectionProp
                   error={e("owner")}
                 />
               )}
-              <NumberField
-                label="Value"
-                value={a.balance}
-                onChange={(balance) => set(i, { balance })}
-                min={0}
-                prefix="$"
-                error={e("balance")}
-                help="Current accumulation (contract) value. Grows tax-deferred until annuitized."
-              />
-              <NumberField
-                label="Cost basis"
-                value={a.basis}
-                onChange={(basis) => set(i, { basis })}
-                min={0}
-                prefix="$"
-                error={e("basis")}
-                help="After-tax premiums paid into the contract. Sets the exclusion ratio — the share of each payout returned tax-free."
-              />
+              {a.purchase_age == null ? (
+                <>
+                  <NumberField
+                    label="Value"
+                    value={a.balance}
+                    onChange={(balance) => set(i, { balance })}
+                    min={0}
+                    prefix="$"
+                    error={e("balance")}
+                    help="Current accumulation (contract) value. Grows tax-deferred until annuitized."
+                  />
+                  <NumberField
+                    label="Cost basis"
+                    value={a.basis}
+                    onChange={(basis) => set(i, { basis })}
+                    min={0}
+                    prefix="$"
+                    error={e("basis")}
+                    help="After-tax premiums paid into the contract. Sets the exclusion ratio — the share of each payout returned tax-free."
+                  />
+                </>
+              ) : (
+                <>
+                  <NumberField
+                    label="Buy at age"
+                    value={a.purchase_age}
+                    onChange={(purchase_age) => set(i, { purchase_age })}
+                    min={40}
+                    max={90}
+                    error={e("purchase_age")}
+                    help="Age at which you plan to buy the annuity. The contract is dormant until then."
+                  />
+                  <NumberField
+                    label="Purchase amount"
+                    value={a.purchase_amount}
+                    onChange={(purchase_amount) => set(i, { purchase_amount })}
+                    min={0}
+                    prefix="$"
+                    error={e("purchase_amount")}
+                    help="Lump sum drawn from the portfolio at that age to buy the annuity (becomes its value and full after-tax basis). A tax-deferred withdrawal to fund it is itself taxed that year."
+                  />
+                </>
+              )}
               <PercentField
                 label="Growth rate"
                 value={a.accumulation_return}
@@ -84,8 +115,20 @@ export function AnnuitiesSection({ input, onChange, errors, dense }: SectionProp
                 help="Length of the period-certain payout (e.g. ~life expectancy at annuitization)."
               />
             </div>
-            <div className="mt-2 flex items-center justify-between">
-              <ModelingDisclosure assetKey="annuity" />
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-4">
+                <CheckboxField
+                  label="Buy in the future"
+                  checked={a.purchase_age != null}
+                  onChange={(on) =>
+                    set(i, on
+                      ? { purchase_age: Math.max(a.annuitize_at_age - 5, 60), purchase_amount: a.purchase_amount || a.balance }
+                      : { purchase_age: null })
+                  }
+                  help="Model buying this annuity later with a lump sum from the portfolio, instead of already owning it."
+                />
+                <ModelingDisclosure assetKey="annuity" />
+              </div>
               <button
                 type="button"
                 onClick={() => onChange({ ...input, annuities: removeAt(input.annuities, i) })}

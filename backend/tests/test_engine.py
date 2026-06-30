@@ -703,6 +703,24 @@ def test_annuity_ird_taxes_gain_only_at_death():
     assert a.transfer_character == "ird"
 
 
+def test_future_annuity_purchase_funds_from_portfolio():
+    # planned buy at 66: dormant before, then a $200k lump sum is drawn from the
+    # portfolio and becomes the contract value with a full after-tax basis.
+    ann = Annuity(name="Future SPDA", owner=0, annuitize_at_age=72, payout_years=20,
+                  accumulation_return=0.0, purchase_age=66, purchase_amount=200_000)
+    rows = Simulator(_solo_with_annuity(ann), strategy=ConversionStrategy.none).run()[0]
+    by = {y.year: y for y in rows}
+    # Pat (born 1966) is 66 in 2032.
+    assert not any(a.asset_class == "annuity" for a in by[2031].accounts)  # dormant
+    bought = [a for a in by[2032].accounts if a.asset_class == "annuity"]
+    assert bought and math.isclose(bought[0].end_balance, 200_000, abs_tol=1)
+    assert math.isclose(bought[0].cost_basis, 200_000, abs_tol=1)  # full basis
+    # the lump sum came out of the portfolio accounts
+    acct_2031 = sum(a.end_balance for a in by[2031].accounts if a.asset_class == "account")
+    acct_2032 = sum(a.end_balance for a in by[2032].accounts if a.asset_class == "account")
+    assert acct_2031 - acct_2032 > 150_000
+
+
 def test_annuity_payout_exhausts_balance_over_term():
     # a 5-year payout from age 63 fully amortizes the balance to zero.
     ann = Annuity(name="SPDA", owner=0, balance=100_000, basis=100_000,

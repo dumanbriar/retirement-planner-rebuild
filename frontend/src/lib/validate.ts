@@ -92,6 +92,14 @@ export function validatePlanInput(input: PlanInput): FieldErrors {
       errors[k("annuitize_at_age")] = "Annuitize age must be 50–90.";
     if (!inRange(a.payout_years, 1, 40))
       errors[k("payout_years")] = "Payout years must be 1–40.";
+    if (a.purchase_age != null) {
+      if (!inRange(a.purchase_age, 40, 90))
+        errors[k("purchase_age")] = "Purchase age must be 40–90.";
+      if (!(a.purchase_amount > 0))
+        errors[k("purchase_amount")] = "Enter the amount to buy with.";
+      if (a.annuitize_at_age < a.purchase_age)
+        errors[k("annuitize_at_age")] = "Annuitize age must be ≥ purchase age.";
+    }
     if (a.owner >= input.persons.length) errors[k("owner")] = "Owner is out of range.";
   });
 

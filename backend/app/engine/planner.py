@@ -429,7 +429,10 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
                       "basis portion is tax-free, the rest is ordinary income (IRC §72(b)). "
                       "At death the remaining gain is income in respect of a decedent — no "
                       "basis step-up; heirs owe ordinary income on the gain only (IRC §691, "
-                      "§72). A surviving spouse continues the contract. NOT modeled: "
+                      "§72). A surviving spouse continues the contract. A planned future "
+                      "purchase draws a one-time lump sum from the portfolio at the "
+                      "purchase age (a tax-deferred withdrawal to fund it is itself taxed) "
+                      "and starts the contract with a full after-tax basis. NOT modeled: "
                       "variable/indexed subaccounts, GLWB/income riders, lifetime "
                       "(mortality-based) annuitization."})
     if any(getattr(s, "survivor_pct", 0) > 0 for s in plan.income_streams):
