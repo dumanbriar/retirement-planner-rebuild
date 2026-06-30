@@ -76,6 +76,8 @@ export interface IncomeStream {
   end_age: number | null; // 30..110
   cola: boolean; // grows with inflation
   taxable: boolean; // taxed as ordinary income
+  /** Two-person households: fraction (0..1) that continues to a surviving spouse. Default 0. */
+  survivor_pct?: number;
 }
 
 /** How an asset is taxed when it passes to its beneficiary at death. */

@@ -95,6 +95,12 @@ class IncomeStream(BaseModel):
     end_age: Optional[int] = Field(default=None, ge=30, le=110)
     cola: bool = True       # grows with inflation
     taxable: bool = True    # taxed as ordinary income
+    # Joint-and-survivor: fraction of the benefit that continues to a surviving
+    # spouse after the owner dies (e.g. 0.5 for a 50% survivor pension). Default
+    # 0.0 preserves prior behavior — the stream stops at the owner's death.
+    # Only meaningful in a two-person household, and only if the stream had
+    # already started before the owner died.
+    survivor_pct: float = Field(default=0.0, ge=0, le=1.0)
 
 
 class ConversionStrategy(str, Enum):

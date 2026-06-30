@@ -15,7 +15,7 @@ from app.engine.taxes import (TaxYearInput, aca_applicable_pct, aca_subsidy,
                               compute_taxes, irmaa_tier,
                               taxable_social_security)
 from app.models import (Account, AccountType, Assumptions, ConversionStrategy,
-                        Liability, Person, PlanInput)
+                        IncomeStream, Liability, Person, PlanInput)
 
 
 # ----------------------------------------------------------- federal tax
@@ -506,3 +506,31 @@ def test_legacy_result_wired_into_plan_and_reconciles():
     assert math.isclose(legacy.to_heirs_net,
                         legacy.to_heirs_gross - legacy.ird_tax, abs_tol=1.0)
     assert legacy.to_charity == 0  # no bequests configured in the base plan
+
+
+# ----------------------------------------- pension survivor (Phase 2)
+def test_pension_survivor_continuation():
+    # Sam (owner 0) holds a $40k/yr pension with a 50% survivor benefit. Sam
+    # dies at 92 (2063); Alex survives to 2067. After Sam's death the benefit
+    # continues to Alex at 50%.
+    plan = couple_plan(income_streams=[IncomeStream(
+        name="Sam pension", owner=0, annual_amount=40_000, start_age=65,
+        cola=False, taxable=True, survivor_pct=0.5)])
+    rows = Simulator(plan, strategy=ConversionStrategy.none).run()[0]
+    by = {y.year: y for y in rows}
+    assert math.isclose(by[2060].other_income, 40_000, abs_tol=1)  # both alive
+    assert math.isclose(by[2063].other_income, 40_000, abs_tol=1)  # Sam alive at 92
+    assert math.isclose(by[2064].other_income, 20_000, abs_tol=1)  # 50% to survivor
+    assert math.isclose(by[2067].other_income, 20_000, abs_tol=1)  # still surviving
+
+
+def test_income_stream_stops_at_death_without_survivor():
+    # Backward-compat lock: default survivor_pct=0 reproduces prior behavior —
+    # the stream stops entirely at the owner's death.
+    plan = couple_plan(income_streams=[IncomeStream(
+        name="Sam pension", owner=0, annual_amount=40_000, start_age=65,
+        cola=False, taxable=True)])
+    rows = Simulator(plan, strategy=ConversionStrategy.none).run()[0]
+    by = {y.year: y for y in rows}
+    assert math.isclose(by[2060].other_income, 40_000, abs_tol=1)
+    assert by[2064].other_income == 0.0  # Sam dead -> nothing continues

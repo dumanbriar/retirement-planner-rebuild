@@ -145,5 +145,6 @@ export function newIncomeStream(): IncomeStream {
     end_age: null,
     cola: true,
     taxable: true,
+    survivor_pct: 0,
   };
 }

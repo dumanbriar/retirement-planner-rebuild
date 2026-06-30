@@ -5,6 +5,7 @@ import {
   CheckboxField,
   NumberField,
   OptionalNumberField,
+  PercentField,
   SelectField,
   TextField,
 } from "../ui/fields";
@@ -69,6 +70,19 @@ export function IncomeStreamsSection({ input, onChange, errors, dense }: Section
                 help="Last age the income is received. Leave blank for lifetime income (e.g. a pension or annuity)."
               />
             </div>
+            {input.persons.length === 2 && (
+              <div className="mt-3 max-w-[220px]">
+                <PercentField
+                  label="Survivor benefit"
+                  value={s.survivor_pct ?? 0}
+                  onChange={(survivor_pct) => set(i, { survivor_pct })}
+                  min={0}
+                  max={100}
+                  error={e("survivor_pct")}
+                  help="Two-person households only: the share of this income that continues to the surviving spouse after the owner dies (e.g. 50% for a joint-and-survivor pension). 0% means the income stops at the owner's death. Only applies once the income has started."
+                />
+              </div>
+            )}
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap gap-4">
                 <CheckboxField

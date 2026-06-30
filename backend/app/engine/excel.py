@@ -135,9 +135,12 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
                             f"payment {l.annual_payment:,.0f}/yr{future}",
                             "assumed", "User input"))
     for s in plan.income_streams:
+        survivor = (f"; {s.survivor_pct * 100:.0f}% survivor benefit"
+                    if getattr(s, "survivor_pct", 0) else "")
         user_inputs.append((f"Income: {s.name} ({persons[s.owner].name})",
                             f"{s.annual_amount:,.0f}/yr ages {s.start_age}-{s.end_age or 'death'}"
-                            f"{' +COLA' if s.cola else ''}{'' if s.taxable else ' (non-taxable)'}",
+                            f"{' +COLA' if s.cola else ''}{'' if s.taxable else ' (non-taxable)'}"
+                            f"{survivor}",
                             "assumed", "User input"))
     for label, val, kind, src in user_inputs:
         ws.cell(row=r, column=1, value=label)

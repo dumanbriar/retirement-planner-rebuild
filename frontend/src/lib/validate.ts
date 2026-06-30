@@ -60,6 +60,8 @@ export function validatePlanInput(input: PlanInput): FieldErrors {
       else if (s.end_age < s.start_age) errors[k("end_age")] = "End age must be ≥ start age.";
     }
     if (s.owner >= input.persons.length) errors[k("owner")] = "Owner is out of range.";
+    if (s.survivor_pct != null && !inRange(s.survivor_pct, 0, 1))
+      errors[k("survivor_pct")] = "Survivor benefit must be 0–100%.";
   });
 
   if (!(input.annual_spending > 0))

@@ -238,12 +238,21 @@ class Simulator:
         taxable = nontaxable = 0.0
         for s in self.plan.income_streams:
             i = s.owner
-            if not self.alive(i, year):
-                continue
-            a = self.age(i, year)
+            a = self.age(i, year)  # notional age; valid even after the owner dies
             if a < s.start_age or (s.end_age is not None and a > s.end_age):
                 continue
-            amt = s.annual_amount * (self.infl(year) if s.cola else 1.0)
+            if self.alive(i, year):
+                factor = 1.0
+            else:
+                # Joint-and-survivor: a fraction continues to a surviving spouse
+                # (e.g. a 50% survivor pension). Requires the stream to have
+                # already started (checked above) and a living spouse.
+                survivor_pct = getattr(s, "survivor_pct", 0.0)
+                survives = len(self.persons) == 2 and self.alive(1 - i, year)
+                if not survives or survivor_pct <= 0:
+                    continue
+                factor = survivor_pct
+            amt = s.annual_amount * (self.infl(year) if s.cola else 1.0) * factor
             if s.taxable:
                 taxable += amt
             else:

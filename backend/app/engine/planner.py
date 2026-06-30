@@ -244,6 +244,14 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
                    "This is optimistic for large earnings pools; Roth is last in the "
                    "withdrawal waterfall so this edge rarely applies."},
     ]
+    if any(getattr(s, "survivor_pct", 0) > 0 for s in plan.income_streams):
+        notes.append({
+            "label": "Pension/annuity survivor benefit", "value": "continues at set %",
+            "kind": "assumed",
+            "source": "User-specified joint-and-survivor percentage. After the owner "
+                      "dies, that fraction of the income continues to a surviving spouse "
+                      "for their remaining years; 0% (default) stops the income at death. "
+                      "Applies only once the income has started."})
     # Attach freshness metadata (last_updated, stale, review_url) to matched notes
     _NOTE_KEY_MAP = {
         "Federal brackets & standard deduction": "federal_brackets",
