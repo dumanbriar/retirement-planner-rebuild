@@ -58,7 +58,7 @@ export function YearTable({
       { label: "Contrib.", help: "New money contributed to accounts this year (excludes reinvested surplus / Social Security, shown under their own columns).", ...money((y) => y.accounts.reduce((s, a) => s + a.contribution, 0) - y.surplus_reinvested) },
       { label: "Growth", help: "Investment growth across all accounts, net of any pre-retirement dividend/interest tax drag.", ...money((y) => y.accounts.reduce((s, a) => s + a.growth, 0)) },
       { label: "Spending", help: "Lifestyle spending goal for the year (the inflated annual spending input). Excludes healthcare, debt, and taxes, shown separately.", ...money((y) => y.spend_goal) },
-      { label: "Healthcare", help: "Net healthcare cost: ACA premiums minus subsidies before 65; Medicare Part B (incl. IRMAA) plus other premiums/OOP after 65.", ...money((y) => y.healthcare_cost) },
+      { label: "Healthcare", help: "Gross healthcare cost: ACA premiums minus subsidies before 65; Medicare Part B (incl. IRMAA) plus other premiums/OOP after 65. Any portion paid tax-free by an HSA is shown separately in 'Wd HSA', not subtracted here.", ...money((y) => y.healthcare_cost) },
       { label: "Debt pay", help: "Liability payments made this year.", ...money((y) => y.debt_payments) },
       { label: "Home buy", help: "One-time down payment / purchase cash drawn from the portfolio when a future mortgage starts. The home itself is not tracked as an asset.", ...money((y) => y.home_purchase) },
       { label: "Soc. Sec.", help: "Gross household Social Security benefits received.", ...money((y) => y.ss_total) },

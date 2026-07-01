@@ -778,6 +778,63 @@ def test_no_phantom_surplus_from_rmds():
                             rel_tol=0.01, abs_tol=1500), f"{y.year}"
 
 
+def test_healthcare_cost_is_gross_not_netted_by_hsa():
+    # Regression: healthcare_cost must report the TRUE (gross) cost of care, not
+    # cost minus whatever the HSA paid tax-free — netting it produced an
+    # artificial one-time jump the year the HSA ran dry, even though the real
+    # cost grew smoothly the whole time. couple_plan() has an HSA that funds
+    # medical costs for years, then depletes around 2060.
+    plan = couple_plan()
+    rows, m = Simulator(plan, strategy=ConversionStrategy.fill_12).run()
+    ret = [y for y in rows if y.phase == "retirement"]
+
+    # (a) whole-portfolio wealth conservation, using the now-gross healthcare
+    # figure: end == start + growth - (spend+healthcare+tax+debt+home) + (ss+other).
+    # This identity is HSA-blind by construction (it sums every account, so the
+    # HSA's own balance draw-down is already captured on the start/end side) and
+    # would NOT have held before the fix, when healthcare_cost quietly subtracted
+    # the HSA's payment on the outflow side without a matching adjustment.
+    for y in ret:
+        start = sum(a.start_balance for a in y.accounts)
+        growth = sum(a.growth for a in y.accounts)
+        end = sum(a.end_balance for a in y.accounts)
+        outflow = y.spend_goal + y.healthcare_cost + y.total_tax \
+            + y.debt_payments + y.home_purchase
+        inflow = y.ss_total + y.other_income
+        assert math.isclose(end, start + growth - outflow + inflow,
+                            rel_tol=0.01, abs_tol=1500), f"{y.year}"
+
+    # (b) no artificial cliff the year the HSA empties: year-over-year healthcare
+    # growth stays within normal inflation/IRMAA bounds (< 15%) every year,
+    # including across the HSA-depletion boundary.
+    by_year = {y.year: y for y in ret}
+    for yr in sorted(by_year):
+        prev = by_year.get(yr - 1)
+        if prev is None or prev.healthcare_cost <= 0:
+            continue
+        growth_rate = by_year[yr].healthcare_cost / prev.healthcare_cost - 1
+        assert growth_rate < 0.15, f"{yr}: healthcare cost jumped {growth_rate:.0%}"
+
+    # (c) the HSA's medical payment is now visible as a funding source: in a
+    # year the HSA pays medical costs, withdrawals_by_type["hsa"] must equal the
+    # HSA account's own reported withdrawal (the same identity excel.py already
+    # computes independently from AccountYear.withdrawal).
+    hsa_paying_year = next(
+        y for y in ret
+        if any(a.type is not None and a.type.value == "hsa" and a.withdrawal > 0
+               for a in y.accounts))
+    hsa_acct_withdrawal = sum(a.withdrawal for a in hsa_paying_year.accounts
+                              if a.type is not None and a.type.value == "hsa")
+    assert math.isclose(hsa_paying_year.withdrawals_by_type.get("hsa", 0.0),
+                        hsa_acct_withdrawal, abs_tol=0.01)
+
+    # (d) golden lock: this is a pure reporting reclassification with zero effect
+    # on actual cash flows or balances.
+    assert math.isclose(m.ending_net_worth_real, 5_357_948.13, rel_tol=1e-6)
+    assert math.isclose(m.lifetime_taxes_real, 510_261.87, rel_tol=1e-6)
+    assert m.depletion_age is None and m.success
+
+
 # --------------------------------- Roth-vs-Traditional contribution split
 def _saver(salary, roth_c=10_000, td_c=10_000, **akw):
     a = dict(roth_conversion_strategy=ConversionStrategy.none,

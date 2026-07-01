@@ -227,7 +227,7 @@ export interface YearRow {
   spend_goal: number;
   debt_payments: number;
   home_purchase: number; // one-time down payment / purchase outflow
-  healthcare_cost: number; // net premiums + OOP, incl. IRMAA
+  healthcare_cost: number; // gross premiums + OOP, incl. IRMAA; HSA-funded portion is in withdrawals_by_type.hsa
   aca_subsidy: number;
   irmaa_surcharge: number;
   ss_benefit: number[]; // per person, gross

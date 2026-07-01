@@ -208,7 +208,7 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
     ws["A1"].font = TITLE_FONT
     headers = (["Year"] + age_cols +
                ["Filing", "Contributions", "Growth (net of drag)",
-                "Spend goal", "Debt pmts", "Home purchase", "Healthcare (net)",
+                "Spend goal", "Debt pmts", "Home purchase", "Healthcare",
                 "ACA subsidy", "IRMAA", "SS gross", "Taxable SS", "Other income",
                 "RMD", "W/D cash", "W/D taxable", "W/D tax-def", "W/D Roth",
                 "W/D HSA", "Roth conversion", "Realized gains", "Dividends",

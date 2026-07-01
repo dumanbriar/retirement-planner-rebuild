@@ -1033,6 +1033,7 @@ class Simulator:
         scratch = YearScratch()
         tax_res = None
         healthcare_net = 0.0
+        healthcare_gross = 0.0
         converged = False
 
         for it in range(40):
@@ -1060,8 +1061,13 @@ class Simulator:
                     acct.withdrawal += take
                     scratch.hsa_medical += take
 
-            healthcare_net = medicare_premiums + pre65_oop \
-                + max(0.0, aca_benchmark - subsidy_guess) - scratch.hsa_medical
+            # healthcare_gross is the TRUE cost of care (reported to the user);
+            # healthcare_net additionally nets out what the HSA already paid
+            # tax-free, and is used ONLY internally to size the waterfall draw
+            # so those dollars aren't funded twice.
+            healthcare_gross = medicare_premiums + pre65_oop \
+                + max(0.0, aca_benchmark - subsidy_guess)
+            healthcare_net = healthcare_gross - scratch.hsa_medical
 
             # 3) Roth conversion to fill the target bracket (taxes paid
             #    from the waterfall, not from the converted amount)
@@ -1152,16 +1158,26 @@ class Simulator:
         else:
             surplus = 0.0
 
+        # Reporting-only view of withdrawals: the HSA's tax-free medical payment
+        # (scratch.hsa_medical) funded part of healthcare_gross directly (step 2,
+        # before the waterfall) and so is invisible in scratch.withdrawals_by_type
+        # (which only tracks waterfall-routed draws). Surface it here as a copy —
+        # NEVER by mutating scratch.withdrawals_by_type itself, since the surplus
+        # calc above already consumed it for `resources`; mutating it there would
+        # double-count those dollars into phantom surplus.
+        report_wd = dict(scratch.withdrawals_by_type)
+        report_wd["hsa"] = report_wd.get("hsa", 0.0) + scratch.hsa_medical
+
         row = YearRow(
             year=year, phase="retirement", filing_status=status, ages=ages, accounts=[],
             spend_goal=spend_goal, debt_payments=debt_payments,
             home_purchase=home_purchase,
-            healthcare_cost=healthcare_net, aca_subsidy=subsidy_guess,
+            healthcare_cost=healthcare_gross, aca_subsidy=subsidy_guess,
             irmaa_surcharge=irmaa_total,
             ss_benefit=benefits, ss_total=ss_total,
             other_income=other_taxable + other_nontaxable,
             rmd_total=rmd_total, rmd_by_person=rmds,
-            withdrawals_by_type=scratch.withdrawals_by_type,
+            withdrawals_by_type=report_wd,
             roth_conversion=scratch.roth_conversion,
             surplus_reinvested=surplus, shortfall=scratch.shortfall,
             realized_gains=scratch.realized_gains,

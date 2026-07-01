@@ -272,7 +272,9 @@ class YearRow(BaseModel):
     spend_goal: float = 0               # inflated lifestyle spending
     debt_payments: float = 0
     home_purchase: float = 0            # one-time down payment / purchase outflow
-    healthcare_cost: float = 0          # net premiums + OOP, incl. IRMAA
+    healthcare_cost: float = 0          # gross premiums + OOP, incl. IRMAA; any
+                                         # HSA-funded portion is reported separately
+                                         # in withdrawals_by_type["hsa"]
     aca_subsidy: float = 0
     irmaa_surcharge: float = 0
     ss_benefit: list[float] = []        # per person, gross
