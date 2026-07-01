@@ -241,6 +241,7 @@ export interface YearRow {
   shortfall: number; // unmet spending (plan failure)
   premiums_paid?: number;
   legacy_distributions?: number;
+  legacy_purchases?: number;
   death_benefits_paid?: number;
   qcd_amount?: number;
   gifts_made?: number;

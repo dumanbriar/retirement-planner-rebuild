@@ -31,7 +31,9 @@ const SERIES: { key: keyof Datum; label: string; color: string; help: string }[]
   { key: "cash_wd", label: "Cash withdrawals", color: "#94a3b8",
     help: "Withdrawals from high-yield savings or money market. Used first in the waterfall to avoid unnecessary taxes." },
   { key: "other", label: "Other income", color: "#a78bfa",
-    help: "Pensions, annuities, part-time income, rental income, and other user-defined income streams." },
+    help: "Pensions, part-time income, rental income, and other user-defined income streams." },
+  { key: "annuity", label: "Annuity income", color: "#c084fc",
+    help: "Payouts from deferred annuities once annuitized. The basis portion is a tax-free return of capital; the gain portion is ordinary income (exclusion ratio)." },
 ];
 
 interface Datum {
@@ -45,6 +47,7 @@ interface Datum {
   hsa_wd: number;
   cash_wd: number;
   other: number;
+  annuity: number;
   need: number;
   shortfall: number;
 }
@@ -83,8 +86,10 @@ export function IncomeSpendingChart({
           hsa_wd: (wd.hsa ?? 0) * d,
           cash_wd: (wd.cash ?? 0) * d,
           other: y.other_income * d,
+          annuity: (y.legacy_distributions ?? 0) * d,
           need:
-            (y.spend_goal + y.healthcare_cost + y.debt_payments + y.home_purchase + y.total_tax) *
+            (y.spend_goal + y.healthcare_cost + y.debt_payments + y.home_purchase + y.total_tax +
+              (y.premiums_paid ?? 0) + (y.gifts_made ?? 0) + (y.legacy_purchases ?? 0)) *
             d,
           shortfall: y.shortfall * d,
         };
@@ -99,12 +104,12 @@ export function IncomeSpendingChart({
       help={
         <>
           Retirement years only. Bars stack each year's funding sources: gross Social Security,
-          RMDs, additional withdrawals by account type, and other income (Roth conversions are
-          excluded — they move money between accounts rather than fund spending). The navy line is
-          total spending need: lifestyle goal + healthcare + debt payments + any home-purchase down
-          payment + taxes. Bars can exceed
-          the line when forced income (e.g. RMDs) outruns need — the surplus is reinvested in the
-          taxable account.
+          RMDs, additional withdrawals by account type, other income, and annuity payouts (Roth
+          conversions are excluded — they move money between accounts rather than fund spending).
+          The navy line is total spending need: lifestyle goal + healthcare + debt payments + any
+          home-purchase down payment + insurance premiums + a planned annuity purchase + taxes.
+          Bars can exceed the line when forced income (e.g. RMDs) outruns need — the surplus is
+          reinvested in the taxable account.
         </>
       }
       bodyClassName="pt-2"

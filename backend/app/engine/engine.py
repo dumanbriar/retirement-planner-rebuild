@@ -570,6 +570,7 @@ class Simulator:
                 beneficiary=Beneficiary.heirs.value,
             ) for a in self.annuities if a.active or a.payout > 0]
             row.premiums_paid = self._ins_premium if retired else 0.0
+            row.legacy_purchases = self._annuity_purchase
             row.death_benefits_paid = self._death_benefit_paid_year
             if retired:
                 row.legacy_distributions += self._annuity_payout

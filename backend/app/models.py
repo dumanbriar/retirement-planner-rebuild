@@ -285,7 +285,8 @@ class YearRow(BaseModel):
     surplus_reinvested: float = 0
     shortfall: float = 0                # unmet spending (plan failure)
     premiums_paid: float = 0            # insurance premiums this year
-    legacy_distributions: float = 0     # annuity/private distributions this year
+    legacy_distributions: float = 0     # annuity/private distributions this year (income)
+    legacy_purchases: float = 0         # one-time asset purchases (e.g. buying an annuity)
     death_benefits_paid: float = 0      # life-insurance proceeds received this year
     qcd_amount: float = 0               # qualified charitable distribution (IRC §408(d)(8))
     gifts_made: float = 0               # lifetime gifts out of the portfolio this year
