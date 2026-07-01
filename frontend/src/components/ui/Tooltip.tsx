@@ -49,7 +49,7 @@ export function Tooltip({
       {pos && (
         <span
           role="tooltip"
-          className={`pointer-events-none fixed z-[100] block ${wide ? "max-w-sm" : "max-w-xs"} rounded-lg bg-slate-800 px-3 py-2 text-left text-xs font-normal leading-relaxed text-slate-100 shadow-lg`}
+          className={`pointer-events-none fixed z-[100] block whitespace-normal break-words ${wide ? "max-w-sm" : "max-w-xs"} rounded-lg bg-slate-800 px-3 py-2 text-left text-xs font-normal leading-relaxed normal-case text-slate-100 shadow-lg`}
           style={{
             left: pos.x,
             top: pos.y,
