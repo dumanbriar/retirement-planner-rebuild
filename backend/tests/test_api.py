@@ -26,7 +26,9 @@ VALID_REQUEST = {
 def test_health_ok():
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok"}
+    body = r.json()
+    assert body["status"] == "ok"
+    assert "build_marker" in body  # lets a deploy be verified from the outside
 
 
 def test_plan_endpoint_accepts_json_body():

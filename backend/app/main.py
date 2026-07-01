@@ -47,7 +47,10 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok"}
+    # build_marker lets a deploy be verified from the outside: bump this string
+    # any time you need to confirm a specific commit actually redeployed rather
+    # than an old container answering health checks.
+    return {"status": "ok", "build_marker": "healthcare-gross-fix-2026-07-01-v2"}
 
 
 @app.get("/api/constants/freshness")

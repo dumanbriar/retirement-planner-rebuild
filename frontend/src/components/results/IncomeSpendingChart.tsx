@@ -163,7 +163,15 @@ export function IncomeSpendingChart({
               }}
             />
             {SERIES.map((s) => (
-              <Bar key={s.key} dataKey={s.key} stackId="income" fill={s.color} name={s.label} />
+              <Bar
+                key={s.key}
+                dataKey={s.key}
+                stackId="income"
+                fill={s.color}
+                name={s.label}
+                stroke="#fff"
+                strokeWidth={1}
+              />
             ))}
             <Line
               type="monotone"
