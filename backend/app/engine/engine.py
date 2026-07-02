@@ -31,7 +31,7 @@ from ..models import (Account, AccountType, AccountVehicle, AccountYear,
                       Annuity, Beneficiary, ConversionStrategy,
                       DistributionKind, InsurancePolicy, LegacyAssetResult,
                       LegacyResult, Metrics, PlanInput, PrivateHolding,
-                      TransferCharacter, YearRow)
+                      RealEstate, TransferCharacter, YearRow)
 from . import constants as C
 from . import socialsecurity as ss
 from .taxes import (TaxYearInput, aca_subsidy, compute_taxes, irmaa_tier,
@@ -149,6 +149,24 @@ class SimPrivate:
         return self.spec.growth_rate
 
 
+class SimRealEstate:
+    """Internal state for a property. Illiquid: never in the withdrawal
+    waterfall; its value counts in net worth (unless excluded by the toggle).
+    Appreciates at the assumed rate; an optional sale pays off the linked
+    mortgage's current balance and deposits the net proceeds, realizing the
+    gain over basis as LTCG net of the §121 primary-residence exclusion."""
+    def __init__(self, spec: RealEstate):
+        self.spec = spec
+        self.owner = spec.owner
+        self.value = spec.value
+        self.basis = spec.basis
+        self.active = True
+        # per-year reporting scratch
+        self.start_balance = self.value
+        self.growth = 0.0
+        self.sale_proceeds = 0.0
+
+
 class YearScratch:
     def __init__(self):
         self.withdrawals_by_type: dict[str, float] = {}
@@ -187,6 +205,7 @@ class Simulator:
         self.policies = [SimInsurance(p) for p in plan.insurance_policies]
         self.annuities = [SimAnnuity(a) for a in plan.annuities]
         self.holdings = [SimPrivate(h) for h in plan.private_holdings]
+        self.props = [SimRealEstate(r) for r in plan.real_estate]
         # per-year insurance/annuity scratch (set each year before the phase step)
         self._ins_premium = 0.0
         self._ins_surrender_gain = 0.0
@@ -198,6 +217,7 @@ class Simulator:
         self._priv_dist_ordinary = 0.0   # ...taxed as ordinary income
         self._priv_dist_qualified = 0.0  # ...taxed as qualified dividends
         self._priv_sale_gain = 0.0       # LTCG realized by a liquidity event
+        self._re_sale_gain = 0.0         # taxable LTCG from property sales (post-§121)
 
         self.accounts = [SimAccount(s) for s in plan.accounts]
         if not any(x.spec.type in (AccountType.taxable, AccountType.cash)
@@ -462,12 +482,17 @@ class Simulator:
                         for an in self.annuities:
                             if an.owner == i:
                                 an.owner = 1 - i
-                        # private shares: a surviving spouse inherits with a
-                        # basis step-up to the date-of-death value (IRC §1014).
+                        # private shares / real estate: a surviving spouse
+                        # inherits with a basis step-up to the date-of-death
+                        # value (IRC §1014; full step-up assumed — see notes).
                         for h in self.holdings:
                             if h.active and h.owner == i:
                                 h.owner = 1 - i
                                 h.basis = h.value
+                        for r in self.props:
+                            if r.active and r.owner == i:
+                                r.owner = 1 - i
+                                r.basis = r.value
                         # life insurance: the death benefit is paid (income-tax-
                         # free, IRC §101) into the surviving spouse's portfolio.
                         for p in self.policies:
@@ -494,6 +519,7 @@ class Simulator:
             self.prepare_insurance(year)
             self.prepare_annuities(year)
             self.prepare_private(year)
+            self.prepare_real_estate(year)
             dividends, interest = self.start_of_year_income()
 
             # a future home purchase activates here: the mortgage appears and a
@@ -554,12 +580,14 @@ class Simulator:
                 row.legacy_distributions += self._priv_distribution
                 self._reinvest(self._priv_distribution - t, row)
 
-            # a liquidity event during accumulation: the LTCG is taxed at the
-            # flat 15% rate (the documented accumulation-phase capital-gain
-            # assumption), paid from the portfolio. Retirement sales instead
-            # flow through compute_taxes with full 0/15/20% stacking + NIIT.
-            if not retired and self._priv_sale_gain > 0:
-                t = self._priv_sale_gain * ACCUM_DIVIDEND_TAX_RATE
+            # a liquidity event / property sale during accumulation: the LTCG
+            # is taxed at the flat 15% rate (the documented accumulation-phase
+            # capital-gain assumption), paid from the portfolio. Retirement
+            # sales instead flow through compute_taxes with full 0/15/20%
+            # stacking + NIIT.
+            if not retired and (self._priv_sale_gain + self._re_sale_gain) > 0:
+                t = (self._priv_sale_gain + self._re_sale_gain) \
+                    * ACCUM_DIVIDEND_TAX_RATE
                 row.total_tax += t
                 tgt = self.surplus_account()
                 tgt.balance -= t
@@ -634,6 +662,16 @@ class Simulator:
                 transfer_character=TransferCharacter.step_up.value,
                 beneficiary=Beneficiary.heirs.value,
             ) for h in self.holdings if h.active or h.sale_proceeds > 0]
+            # real estate (value, basis, this year's appreciation / sale)
+            row.accounts += [AccountYear(
+                name=r.spec.name, type=None, owner=r.owner,
+                start_balance=r.start_balance, contribution=0.0,
+                withdrawal=r.sale_proceeds, growth=r.growth,
+                end_balance=r.value, cost_basis=r.basis,
+                asset_class="realestate",
+                transfer_character=TransferCharacter.step_up.value,
+                beneficiary=Beneficiary.heirs.value,
+            ) for r in self.props if r.active or r.sale_proceeds > 0]
             row.premiums_paid = self._ins_premium if retired else 0.0
             row.legacy_purchases = self._annuity_purchase
             row.death_benefits_paid = self._death_benefit_paid_year
@@ -643,7 +681,9 @@ class Simulator:
             row.total_assets = (sum(x.balance for x in self.accounts)
                                 + sum(p.cash_value for p in self.policies if p.active)
                                 + sum(a.balance for a in self.annuities if a.active)
-                                + sum(h.value for h in self.holdings if h.active))
+                                + sum(h.value for h in self.holdings if h.active)
+                                + sum(r.value for r in self.props
+                                      if r.active and r.spec.include_in_net_worth))
             row.total_liabilities = sum(l["balance"] for l in self.liabilities
                                         if self._liab_active(l, year))
             row.net_worth = row.total_assets - row.total_liabilities
@@ -891,6 +931,52 @@ class Simulator:
                 self._priv_dist_qualified += d
             else:
                 self._priv_dist_ordinary += d
+
+    def prepare_real_estate(self, year: int) -> None:
+        """Process properties for the year, BEFORE the phase step so the
+        results are stable across the tax fixed point. The value appreciates
+        at the assumed rate. A sale at sale_age happens at the start-of-year
+        value: the gain over basis — reduced by the IRC §121 exclusion for a
+        primary residence ($250k/$500k by filing status, not indexed) — is a
+        long-term capital gain; the linked mortgage's CURRENT balance is paid
+        off from the proceeds and the net cash joins the portfolio. Sets
+        self._re_sale_gain (taxable LTCG this year)."""
+        self._re_sale_gain = 0.0
+        for r in self.props:
+            r.start_balance = r.value
+            r.growth = 0.0
+            r.sale_proceeds = 0.0
+            if not r.active or not self.alive(r.owner, year):
+                continue
+            age = self.age(r.owner, year)
+            if r.spec.sale_age is not None and age >= r.spec.sale_age:
+                gain = max(0.0, r.value - r.basis)
+                if r.spec.is_primary:
+                    gain = max(0.0, gain
+                               - C.SEC121_EXCLUSION[self.filing_status(year)])
+                self._re_sale_gain += gain
+                r.sale_proceeds = r.value
+                # pay off the linked mortgage from the proceeds (its current
+                # balance; the debt already lives in total_liabilities, so
+                # zeroing it here is the only adjustment — no double count)
+                payoff = 0.0
+                li = r.spec.liability_index
+                if li is not None and li < len(self.liabilities):
+                    l = self.liabilities[li]
+                    if self._liab_active(l, year) and l["balance"] > 0:
+                        payoff = min(l["balance"], r.value)
+                        l["balance"] -= payoff
+                net = r.value - payoff
+                tgt = self.surplus_account()
+                tgt.balance += net
+                tgt.contribution += net
+                if tgt.spec.type == AccountType.taxable:
+                    tgt.basis += net  # after-tax proceeds: no future gain
+                r.value = 0.0
+                r.active = False
+                continue
+            r.growth = r.value * r.spec.appreciation
+            r.value += r.growth
 
     # -------------------------------------------------------- accumulation yr
     def accumulation_year_step(self, year: int, status: str,
@@ -1152,9 +1238,16 @@ class Simulator:
         for it in range(40):
             for (b, bs), acct in zip(snapshot, self.accounts):
                 acct.balance, acct.basis = b, bs
+                # preserve pre-step state across iterations: start_balance, and
+                # any contribution deposited by the prepare_* steps before this
+                # loop (a property/holding sale, an insurance surrender) — the
+                # snapshot balance already contains those dollars, so wiping
+                # the flow would break the start+flows=end audit identity.
                 cur_start = acct.start_balance
+                cur_contrib = acct.contribution
                 acct.reset_flows()
                 acct.start_balance = cur_start
+                acct.contribution = cur_contrib
             scratch = YearScratch()
 
             # 1) mandatory RMDs
@@ -1228,14 +1321,15 @@ class Simulator:
                         + scratch.hsa_nonmedical + other_taxable + interest
                         + self._ins_surrender_gain + self._annuity_taxable
                         + self._priv_dist_ordinary)
+            sale_gain = self._priv_sale_gain + self._re_sale_gain
             tax_res = compute_taxes(TaxYearInput(
                 year=year, filing_status=status, inflation=a.inflation,
                 ordinary_income=ordinary, ss_benefits=ss_total,
                 qualified_dividends=dividends + self._priv_dist_qualified,
-                realized_ltcg=scratch.realized_gains + self._priv_sale_gain,
+                realized_ltcg=scratch.realized_gains + sale_gain,
                 interest=interest, ages_65_plus=ages65, state_rate=a.state_tax_rate))
             pref = min(dividends + self._priv_dist_qualified
-                       + max(0.0, scratch.realized_gains + self._priv_sale_gain),
+                       + max(0.0, scratch.realized_gains + sale_gain),
                        tax_res.taxable_income)
             last_ord_taxable = tax_res.taxable_income - pref
             last_conversion = scratch.roth_conversion
@@ -1296,7 +1390,8 @@ class Simulator:
             withdrawals_by_type=report_wd,
             roth_conversion=scratch.roth_conversion,
             surplus_reinvested=surplus, shortfall=scratch.shortfall,
-            realized_gains=scratch.realized_gains + self._priv_sale_gain,
+            realized_gains=scratch.realized_gains + self._priv_sale_gain
+            + self._re_sale_gain,
             taxable_ss=tax_res.taxable_ss, agi=tax_res.agi, magi=tax_res.magi,
             deductions=tax_res.deductions, taxable_income=tax_res.taxable_income,
             federal_tax=tax_res.federal_tax, ltcg_tax=tax_res.ltcg_tax,

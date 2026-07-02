@@ -1,12 +1,34 @@
-import { Plus, Trash2 } from "lucide-react";
+import { Home, Plus, Trash2 } from "lucide-react";
 import type { Liability } from "../../lib/types";
-import { newLiability } from "../../lib/sample";
+import { newLiability, newRealEstate } from "../../lib/sample";
 import { NumberField, OptionalNumberField, PercentField, TextField } from "../ui/fields";
 import { removeAt, type SectionProps, updateAt } from "./sectionProps";
 
 export function LiabilitiesSection({ input, onChange, errors, dense }: SectionProps) {
   const set = (i: number, patch: Partial<Liability>) =>
     onChange({ ...input, liabilities: updateAt(input.liabilities, i, patch) });
+
+  // Removing a liability shifts the indices that real-estate entries link to.
+  const removeLiability = (i: number) =>
+    onChange({
+      ...input,
+      liabilities: removeAt(input.liabilities, i),
+      real_estate: input.real_estate.map((r) =>
+        r.liability_index == null || r.liability_index < i
+          ? r
+          : { ...r, liability_index: r.liability_index === i ? null : r.liability_index - 1 },
+      ),
+    });
+
+  // Second entry path for a property: track the home behind a mortgage.
+  const trackProperty = (i: number) =>
+    onChange({
+      ...input,
+      real_estate: [
+        ...input.real_estate,
+        newRealEstate(i, `Home (${input.liabilities[i].name})`),
+      ],
+    });
 
   return (
     <div className="space-y-3">
@@ -63,7 +85,7 @@ export function LiabilitiesSection({ input, onChange, errors, dense }: SectionPr
                 max={100}
                 placeholder="now"
                 error={e("start_age")}
-                help="For a future purchase (e.g. a mortgage on a home bought later): the primary person's age when the debt begins. Leave blank for a debt you already have. The home itself is not tracked as an asset, so net worth dips at purchase."
+                help="For a future purchase (e.g. a mortgage on a home bought later): the primary person's age when the debt begins. Leave blank for a debt you already have. The home itself isn't tracked automatically — use 'Track the property as an asset' below (or add it under Real estate) to model its value too."
               />
               {l.start_age != null && (
                 <NumberField
@@ -77,10 +99,28 @@ export function LiabilitiesSection({ input, onChange, errors, dense }: SectionPr
                 />
               )}
             </div>
-            <div className="mt-2 flex justify-end">
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              {(() => {
+                const linked = input.real_estate.find((r) => r.liability_index === i);
+                return linked ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+                    <Home className="h-3 w-3" /> Property tracked: {linked.name} (see Real
+                    estate)
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => trackProperty(i)}
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 transition-colors hover:text-brand-600"
+                    title="Also track the property behind this loan as an asset (appreciation, sale with mortgage payoff, basis step-up at death)."
+                  >
+                    <Home className="h-3 w-3" /> Track the property as an asset
+                  </button>
+                );
+              })()}
               <button
                 type="button"
-                onClick={() => onChange({ ...input, liabilities: removeAt(input.liabilities, i) })}
+                onClick={() => removeLiability(i)}
                 className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
               >
                 <Trash2 className="h-3.5 w-3.5" /> Remove

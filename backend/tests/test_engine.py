@@ -18,7 +18,7 @@ from app.engine.planner import SPLIT_LEVELS, apply_split
 from app.models import (Account, AccountType, AccountVehicle, Annuity,
                         Assumptions, ConversionStrategy, DistributionKind,
                         IncomeStream, InsurancePolicy, Liability, Person,
-                        PlanInput, PrivateHolding)
+                        PlanInput, PrivateHolding, RealEstate)
 
 
 # ----------------------------------------------------------- federal tax
@@ -897,6 +897,197 @@ def test_private_holding_identity_and_full_plan():
     from app.engine.excel import build_workbook
     result = build_plan(plan)
     assert build_workbook(plan, result)[:2] == b"PK"
+
+
+# ------------------------------------------------- real estate (Phase 6)
+def _solo_with_property(prop: RealEstate, liabilities=None, **kw) -> PlanInput:
+    return PlanInput(
+        persons=[Person(name="Pat", current_age=60, retirement_age=62, death_age=85,
+                        ss_monthly_at_fra=2500, ss_claim_age=67)],
+        accounts=[
+            Account(name="401k", type=AccountType.tax_deferred, owner=0,
+                    balance=1_000_000, annual_contribution=0, expected_return=0.05),
+            Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                    balance=200_000, cost_basis=200_000, annual_contribution=0,
+                    expected_return=0.05),
+        ],
+        real_estate=[prop],
+        liabilities=liabilities or [],
+        annual_spending=60_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none),
+        **kw)
+
+
+def test_sec121_exclusion_statutory_values():
+    # IRC §121(b): $250k single / $500k MFJ, fixed since 1997, NOT indexed.
+    assert C.SEC121_EXCLUSION == {"single": 250_000, "mfj": 500_000}
+
+
+def test_real_estate_appreciation_hand_check():
+    prop = RealEstate(name="Home", owner=0, value=600_000, basis=300_000,
+                      appreciation=0.03)
+    rows = Simulator(_solo_with_property(prop), strategy=ConversionStrategy.none).run()[0]
+    re0 = next(a for a in rows[0].accounts if a.asset_class == "realestate")
+    # 600,000 * 1.03 = 618,000
+    assert math.isclose(re0.growth, 18_000, abs_tol=0.01)
+    assert math.isclose(re0.end_balance, 618_000, abs_tol=0.01)
+    assert re0.transfer_character == "step_up"
+    # value counts in total assets alongside the two accounts
+    accts = sum(a.end_balance for a in rows[0].accounts if a.asset_class == "account")
+    assert math.isclose(rows[0].total_assets, accts + 618_000, abs_tol=0.5)
+
+
+def test_primary_home_sale_applies_121_exclusion_and_pays_off_mortgage():
+    # Appreciation 0 for clean numbers. Sale at 65 (2031, retired, single filer):
+    # gain = 600k - 200k = 400k; §121 excludes 250k -> taxable LTCG 150k.
+    # The linked mortgage (rate 0, payment 0 -> constant 100k) is paid off from
+    # the proceeds, so the portfolio receives 600k - 100k = 500k (pre-tax).
+    prop = RealEstate(name="Home", owner=0, value=600_000, basis=200_000,
+                      appreciation=0.0, is_primary=True, sale_age=65,
+                      liability_index=0)
+    mort = Liability(name="Mortgage", balance=100_000, interest_rate=0.0,
+                     annual_payment=0)
+    rows = Simulator(_solo_with_property(prop, liabilities=[mort]),
+                     strategy=ConversionStrategy.none).run()[0]
+    by = {y.year: y for y in rows}
+    y31 = by[2031]
+    assert math.isclose(y31.realized_gains, 150_000, abs_tol=0.01)  # 400k - 250k
+    assert y31.total_liabilities == 0            # mortgage paid off at sale
+    assert by[2030].total_liabilities == 100_000  # ...but standing before
+    re31 = next(a for a in y31.accounts if a.asset_class == "realestate")
+    assert math.isclose(re31.withdrawal, 600_000, abs_tol=0.01)  # gross sale
+    assert re31.end_balance == 0
+    assert not any(a.asset_class == "realestate" for a in by[2032].accounts)
+    # net proceeds (600k - 100k payoff) went into the portfolio accounts
+    base_rows = Simulator(_solo_with_property(
+        RealEstate(name="none", owner=0, value=0), liabilities=[Liability(
+            name="Mortgage", balance=100_000, interest_rate=0.0, annual_payment=0)]),
+        strategy=ConversionStrategy.none).run()[0]
+    base31 = next(y for y in base_rows if y.year == 2031)
+    bump = (sum(a.end_balance for a in y31.accounts if a.asset_class == "account")
+            - sum(a.end_balance for a in base31.accounts if a.asset_class == "account"))
+    # 500k deposited at the start of the year earns that year's growth (~5%),
+    # less the extra waterfall draw funding the LTCG tax on the 150k gain
+    assert 480_000 < bump < 530_000
+
+
+def test_investment_property_gets_no_121_exclusion():
+    # Identical sale, is_primary=False: the full 400k gain is taxable —
+    # exactly 250k more than the primary-residence case.
+    def gains(primary: bool) -> float:
+        prop = RealEstate(name="Prop", owner=0, value=600_000, basis=200_000,
+                          appreciation=0.0, is_primary=primary, sale_age=65)
+        rows = Simulator(_solo_with_property(prop),
+                         strategy=ConversionStrategy.none).run()[0]
+        return next(y for y in rows if y.year == 2031).realized_gains
+    assert math.isclose(gains(False), 400_000, abs_tol=0.01)
+    assert math.isclose(gains(False) - gains(True), 250_000, abs_tol=0.01)
+
+
+def test_mfj_sale_uses_500k_exclusion():
+    # Couple (MFJ): a 400k gain is fully inside the $500k exclusion -> $0
+    # taxable; the identical investment property realizes the full 400k.
+    # (Checked through prepare_real_estate directly so unrelated brokerage
+    # gains in the full run can't contaminate the hand-computed value.)
+    def sale_gain(primary: bool) -> float:
+        prop = RealEstate(name="Home", owner=0, value=600_000, basis=200_000,
+                          appreciation=0.0, is_primary=primary, sale_age=70)
+        sim = Simulator(couple_plan(real_estate=[prop]),
+                        strategy=ConversionStrategy.none)
+        sim.prepare_real_estate(2041)  # Sam (b. 1971) is 70; both alive -> mfj
+        return sim._re_sale_gain
+    assert sale_gain(True) == 0.0
+    assert math.isclose(sale_gain(False), 400_000, abs_tol=0.01)
+
+
+def test_real_estate_excluded_from_net_worth_but_in_estate():
+    prop = RealEstate(name="Home", owner=0, value=500_000, basis=500_000,
+                      appreciation=0.03, include_in_net_worth=False)
+    plan = _solo_with_property(prop)
+    result = build_plan(plan)
+    y0 = result.years[0]
+    # total assets = the two accounts only (home excluded by the toggle)
+    accts = sum(a.end_balance for a in y0.accounts if a.asset_class == "account")
+    assert math.isclose(y0.total_assets, accts, abs_tol=0.5)
+    # ...but the audit row is still present, and it still passes at death
+    assert any(a.asset_class == "realestate" for a in y0.accounts)
+    re_legacy = next(a for a in result.legacy.assets if a.asset_class == "realestate")
+    assert math.isclose(re_legacy.gross, 500_000 * 1.03 ** 26, rel_tol=1e-9)
+    assert re_legacy.tax == 0
+
+
+def test_real_estate_step_up_at_death():
+    # Held to death: heirs receive the full value income-tax-free (IRC §1014).
+    prop = RealEstate(name="Home", owner=0, value=400_000, basis=100_000,
+                      appreciation=0.03)
+    result = build_plan(_solo_with_property(prop))
+    re_ = next(a for a in result.legacy.assets if a.asset_class == "realestate")
+    assert math.isclose(re_.gross, 400_000 * 1.03 ** 26, rel_tol=1e-9)  # dies 2051
+    assert re_.tax == 0
+    assert re_.transfer_character == "step_up"
+
+
+def test_real_estate_spousal_transfer_steps_up_basis():
+    prop = RealEstate(name="Home", owner=0, value=400_000, basis=150_000,
+                      appreciation=0.03)
+    rows = Simulator(couple_plan(real_estate=[prop]),
+                     strategy=ConversionStrategy.none).run()[0]
+    by = {y.year: y for y in rows}
+    re64 = next(a for a in by[2064].accounts if a.asset_class == "realestate")
+    assert re64.owner == 1
+    assert math.isclose(re64.cost_basis, re64.start_balance, abs_tol=0.5)
+
+
+def test_real_estate_identity_and_workbook():
+    prop = RealEstate(name="Home", owner=0, value=650_000, basis=300_000,
+                      appreciation=0.03, is_primary=True, sale_age=75,
+                      liability_index=0)
+    plan = couple_plan(real_estate=[prop], liabilities=[Liability(
+        name="Mortgage", balance=220_000, interest_rate=0.0325,
+        annual_payment=24_000)])
+    rows, m = Simulator(plan, strategy=ConversionStrategy.fill_12).run()
+    for y in rows:
+        for ac in y.accounts:
+            recon = (ac.start_balance + ac.contribution - ac.withdrawal
+                     - ac.distribution - ac.conversion_out + ac.conversion_in
+                     + ac.growth)
+            assert math.isclose(recon, ac.end_balance, abs_tol=0.5), \
+                f"{y.year} {ac.name}"
+    from app.engine.excel import build_workbook
+    result = build_plan(plan)
+    assert build_workbook(plan, result)[:2] == b"PK"
+
+
+def test_retirement_sale_deposit_survives_tax_fixed_point():
+    # Regression: contributions deposited by the prepare_* steps (a property or
+    # holding sale, an insurance surrender) were wiped by reset_flows() inside
+    # the retirement tax fixed-point loop, breaking the start+flows=end audit
+    # identity in the sale year. The surplus account must show the deposit as a
+    # contribution AND reconcile. Also covers the (latent since Phase 3)
+    # insurance-surrender variant of the same bug.
+    pol = InsurancePolicy(name="WL", owner=0, annual_premium=0, cash_value=180_000,
+                          cash_value_return=0.0, death_benefit=500_000,
+                          premiums_paid_to_date=120_000, surrender_at_age=70)
+    prop = RealEstate(name="Home", owner=0, value=600_000, basis=200_000,
+                      appreciation=0.0, is_primary=True, sale_age=70)
+    plan = _solo_with_property(prop, insurance_policies=[pol])
+    rows = Simulator(plan, strategy=ConversionStrategy.none).run()[0]
+    y = next(r for r in rows if r.year == 2036)  # Pat is 70: sale + surrender
+    brokerage = next(a for a in y.accounts if a.name == "Brokerage")
+    # both deposits (600k sale + 180k surrender) recorded as contributions
+    assert brokerage.contribution >= 780_000 - 1
+    for ac in y.accounts:
+        recon = (ac.start_balance + ac.contribution - ac.withdrawal
+                 - ac.distribution - ac.conversion_out + ac.conversion_in
+                 + ac.growth)
+        assert math.isclose(recon, ac.end_balance, abs_tol=0.5), ac.name
+
+
+def test_real_estate_liability_link_validated():
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        _solo_with_property(RealEstate(name="Home", owner=0, value=500_000,
+                                       liability_index=3))  # no such liability
 
 
 # -------------------------------- surplus reinvestment conservation (regression)

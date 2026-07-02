@@ -326,9 +326,10 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
                    "and a one-time down payment begin that year. Amounts are entered as "
                    "the literal (nominal) dollar values at the purchase date — the actual "
                    "loan and down payment expected — not today's dollars. The home itself "
-                   "is NOT modeled as an asset, so net worth "
-                   "reflects only the new debt and the cash spent — it understates reality "
-                   "by roughly the property's value. Pre-retirement mortgage payments are "
+                   "is NOT automatically modeled as an asset — add a Real estate entry "
+                   "(optionally linked to this mortgage) to track its value; otherwise net "
+                   "worth reflects only the new debt and the cash spent. "
+                   "Pre-retirement mortgage payments are "
                    "assumed covered by (unmodeled) wages, as with existing debts; the down "
                    "payment is always drawn from the portfolio. Your entered retirement "
                    "contributions are NOT reduced in the purchase year — the full "
@@ -452,6 +453,26 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
                       "inherits with the same step-up. NOT modeled: pass-through basis "
                       "adjustments (the K-1 is taxed as the cash received), QSBS §1202 "
                       "exclusion, valuation discounts, installment sales (§453)."})
+    if plan.real_estate:
+        notes.append({
+            "label": "Real estate", "value": "illiquid; §121 at sale; step-up at death",
+            "kind": "modeled",
+            "source": "The property appreciates at the user-assumed rate and never enters "
+                      "the withdrawal waterfall (illiquid). An optional sale at the chosen "
+                      "age realizes the gain over cost basis as a long-term capital gain — "
+                      "for a primary residence, net of the IRC §121 exclusion ($250,000 "
+                      "single / $500,000 MFJ, fixed by statute since 1997 and NOT indexed) "
+                      "— with 0/15/20% stacking and NIIT §1411 in retirement (a flat 15% "
+                      "before household retirement). A linked mortgage's remaining balance "
+                      "is paid off from the sale proceeds; the debt itself is tracked once, "
+                      "in liabilities. Held to death, the property passes with a stepped-up "
+                      "basis and no income tax to heirs (IRC §1014); a surviving spouse is "
+                      "assumed to receive a FULL step-up (exact for community property; "
+                      "elsewhere only the decedent's half steps up). If excluded from net "
+                      "worth by the toggle, the value still appears in the Legacy/estate "
+                      "view at death. NOT modeled: depreciation recapture on rentals "
+                      "(§1250), §1031 exchanges, property tax/upkeep (fold into spending), "
+                      "rental income (add an income stream), §121 ownership/use tests."})
     if any(getattr(s, "survivor_pct", 0) > 0 for s in plan.income_streams):
         notes.append({
             "label": "Pension/annuity survivor benefit", "value": "continues at set %",

@@ -194,6 +194,33 @@ class PrivateHolding(BaseModel):
     sale_age: Optional[int] = Field(default=None, ge=18, le=100)
 
 
+class RealEstate(BaseModel):
+    """Residence or investment property (illiquid). Amounts are nominal.
+
+    Never in the withdrawal waterfall. The value appreciates at the assumed
+    rate. An optional sale at sale_age realizes the gain over basis as a
+    long-term capital gain — for a primary residence, net of the IRC §121
+    exclusion ($250k single / $500k MFJ, not indexed) — pays off any linked
+    mortgage from the proceeds, and deposits the net cash into the portfolio.
+    Held to death it passes to heirs with a basis step-up (IRC §1014)."""
+    name: str = "Home"
+    owner: int = Field(default=0, ge=0, le=1)
+    value: float = Field(default=0, ge=0)      # current market value, nominal
+    basis: float = Field(default=0, ge=0)      # purchase price + improvements
+    appreciation: float = Field(default=0.03, ge=-0.10, le=0.20)  # assumed
+    is_primary: bool = True                    # §121 exclusion applies at sale
+    sale_age: Optional[int] = Field(default=None, ge=18, le=100)
+    # Index into PlanInput.liabilities of the mortgage on this property. At a
+    # sale, its CURRENT remaining balance is paid off from the proceeds. The
+    # debt itself keeps living in liabilities/total_liabilities as usual — the
+    # link only routes the payoff, so nothing is double-counted.
+    liability_index: Optional[int] = Field(default=None, ge=0)
+    # Exclude the value from net worth / total assets (some households prefer
+    # not to count the roof over their head). Sale proceeds and the at-death
+    # legacy still appear.
+    include_in_net_worth: bool = True
+
+
 class ConversionStrategy(str, Enum):
     none = "none"
     fill_10 = "fill_10"
@@ -243,6 +270,7 @@ class PlanInput(BaseModel):
     insurance_policies: list[InsurancePolicy] = Field(default_factory=list, max_length=20)
     annuities: list[Annuity] = Field(default_factory=list, max_length=20)
     private_holdings: list[PrivateHolding] = Field(default_factory=list, max_length=20)
+    real_estate: list[RealEstate] = Field(default_factory=list, max_length=20)
     annual_spending: float = Field(gt=0)  # retirement spend goal, today's $
     assumptions: Assumptions = Field(default_factory=Assumptions)
 
@@ -264,6 +292,13 @@ class PlanInput(BaseModel):
         for h in self.private_holdings:
             if h.owner >= n:
                 raise ValueError(f"Private holding '{h.name}' owner index out of range")
+        for re_ in self.real_estate:
+            if re_.owner >= n:
+                raise ValueError(f"Real estate '{re_.name}' owner index out of range")
+            if re_.liability_index is not None and \
+                    re_.liability_index >= len(self.liabilities):
+                raise ValueError(
+                    f"Real estate '{re_.name}' links to a liability that doesn't exist")
         return self
 
 

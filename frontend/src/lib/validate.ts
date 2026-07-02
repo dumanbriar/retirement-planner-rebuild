@@ -116,6 +116,20 @@ export function validatePlanInput(input: PlanInput): FieldErrors {
     if (h.owner >= input.persons.length) errors[k("owner")] = "Owner is out of range.";
   });
 
+  (input.real_estate ?? []).forEach((r, i) => {
+    const k = (f: string) => `real_estate.${i}.${f}`;
+    if (!r.name.trim()) errors[k("name")] = "Name is required.";
+    if (!(r.value >= 0)) errors[k("value")] = "Must be ≥ 0.";
+    if (!(r.basis >= 0)) errors[k("basis")] = "Must be ≥ 0.";
+    if (!inRange(r.appreciation, -0.1, 0.2))
+      errors[k("appreciation")] = "Appreciation must be −10% to 20%.";
+    if (r.sale_age != null && !inRange(r.sale_age, 18, 100))
+      errors[k("sale_age")] = "Sale age must be 18–100.";
+    if (r.liability_index != null && r.liability_index >= input.liabilities.length)
+      errors[k("liability_index")] = "Linked mortgage no longer exists.";
+    if (r.owner >= input.persons.length) errors[k("owner")] = "Owner is out of range.";
+  });
+
   if (!(input.annual_spending > 0))
     errors["annual_spending"] = "Annual retirement spending must be greater than 0.";
 

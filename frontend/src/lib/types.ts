@@ -150,6 +150,28 @@ export interface PrivateHolding {
   sale_age: number | null;
 }
 
+/**
+ * Residence or investment property (illiquid). Amounts are nominal. Never in
+ * the withdrawal waterfall; appreciates at the assumed rate. An optional sale
+ * realizes the gain as LTCG (primary residences get the IRC §121 exclusion),
+ * pays off a linked mortgage, and deposits the net proceeds.
+ */
+export interface RealEstate {
+  name: string;
+  owner: number;
+  value: number; // current market value, nominal
+  basis: number; // purchase price + improvements
+  appreciation: number; // assumed annual appreciation
+  /** Primary residence: the §121 gain exclusion ($250k/$500k) applies at sale. */
+  is_primary: boolean;
+  /** Optional sale age (null => held to death, basis step-up per IRC §1014). */
+  sale_age: number | null;
+  /** Index into liabilities of the mortgage paid off from sale proceeds. */
+  liability_index: number | null;
+  /** Exclude the value from net worth / total assets (legacy view still shows it). */
+  include_in_net_worth: boolean;
+}
+
 /** How an asset is taxed when it passes to its beneficiary at death. */
 export type TransferCharacter = "tax_free" | "step_up" | "ird";
 
@@ -213,6 +235,7 @@ export interface PlanInput {
   insurance_policies: InsurancePolicy[];
   annuities: Annuity[];
   private_holdings: PrivateHolding[];
+  real_estate: RealEstate[];
   annual_spending: number; // retirement spend goal, today's $
   assumptions: Assumptions;
 }

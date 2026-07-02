@@ -8,6 +8,7 @@ import {
   ChevronsRight,
   Coins,
   CreditCard,
+  Home,
   Landmark,
   Loader2,
   RefreshCw,
@@ -29,6 +30,7 @@ import { IncomeStreamsSection } from "./IncomeStreamsSection";
 import { InsuranceSection } from "./InsuranceSection";
 import { AnnuitiesSection } from "./AnnuitiesSection";
 import { PrivateHoldingsSection } from "./PrivateHoldingsSection";
+import { RealEstateSection } from "./RealEstateSection";
 import { SpendingSection } from "./SpendingSection";
 import { AssumptionsSection } from "./AssumptionsSection";
 import { PlanIO } from "./PlanIO";
@@ -235,6 +237,19 @@ export function Sidebar({
           }
         >
           <PrivateHoldingsSection {...sectionProps} />
+        </SectionAccordion>
+
+        <SectionAccordion
+          icon={Home}
+          title="Real estate"
+          hasError={hasErr("real_estate.")}
+          summary={
+            input.real_estate.length === 0
+              ? "None"
+              : input.real_estate.map((r) => `${r.name} ${fmtCurrency(r.value)}`).join(" · ")
+          }
+        >
+          <RealEstateSection {...sectionProps} />
         </SectionAccordion>
 
         <SectionAccordion

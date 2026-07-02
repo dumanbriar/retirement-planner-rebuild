@@ -50,7 +50,7 @@ def health() -> dict:
     # build_marker lets a deploy be verified from the outside: bump this string
     # any time you need to confirm a specific commit actually redeployed rather
     # than an old container answering health checks.
-    return {"status": "ok", "build_marker": "phase5-private-holdings-2026-07-02"}
+    return {"status": "ok", "build_marker": "phase6-real-estate-2026-07-02"}
 
 
 @app.get("/api/constants/freshness")

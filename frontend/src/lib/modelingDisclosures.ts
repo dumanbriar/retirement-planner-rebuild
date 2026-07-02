@@ -87,6 +87,18 @@ export const MODELING_DISCLOSURES: Record<string, ModelingSpec> = {
       "Pass-through basis adjustments (the K-1 is taxed as cash received), QSBS §1202, valuation discounts, installment sales",
     ],
   },
+  realestate: {
+    modeled: [
+      "Illiquid: never tapped by the withdrawal waterfall; appreciates at the assumed rate",
+      "Sale realizes the gain over basis as LTCG; primary residences exclude $250k/$500k (IRC §121, not indexed)",
+      "A linked mortgage's remaining balance is paid off from the sale proceeds",
+      "Held to death: basis step-up, no income tax to heirs (IRC §1014)",
+      "Optional: exclude the value from net worth (still shown in the Legacy view)",
+    ],
+    notModeled: [
+      "Depreciation recapture (§1250), §1031 exchanges, property tax/upkeep (fold into spending), rental income (add an income stream), §121 ownership/use tests",
+    ],
+  },
 };
 
 export function modelingSpec(key: string): ModelingSpec | undefined {

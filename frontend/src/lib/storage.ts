@@ -29,6 +29,7 @@ export function coercePlanInput(
     insurance_policies: parsed.insurance_policies ?? [],
     annuities: parsed.annuities ?? [],
     private_holdings: parsed.private_holdings ?? [],
+    real_estate: parsed.real_estate ?? [],
     annual_spending: parsed.annual_spending,
     assumptions: { ...DEFAULT_ASSUMPTIONS, ...(parsed.assumptions ?? {}) },
   };

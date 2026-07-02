@@ -174,6 +174,14 @@ ACA_CLIFF_FPL = 4.00
 FPL_FIRST_PERSON = 15_650
 FPL_PER_ADDITIONAL = 5_500
 
+# ---------------------------------------------------------------------------
+# IRC §121: exclusion of gain on the sale of a principal residence — up to
+# $250,000 (single) / $500,000 (MFJ) of gain is excluded when the ownership
+# and use tests are met. Fixed by statute since 1997 and NOT indexed for
+# inflation (§121(b)), so the engine holds it constant in nominal terms.
+# ---------------------------------------------------------------------------
+SEC121_EXCLUSION = {"single": 250_000, "mfj": 500_000}
+
 # HSA: withdrawals for qualified medical expenses are tax-free at any age;
 # non-medical withdrawals are ordinary income plus a 20% additional tax
 # before age 65 (IRC sec. 223(f)). Medicare premiums are HSA-qualified
@@ -294,6 +302,13 @@ CONSTANT_METADATA: dict[str, dict[str, str]] = {
         "last_updated": "2022-01-01",
         "update_cycle": "legislative",
         "review_url": "https://www.irs.gov/pub/irs-tege/uniform_rmd_wksht.pdf",
+    },
+    "sec121_exclusion": {
+        # $250k/$500k principal-residence exclusion, fixed (not indexed) since
+        # the Taxpayer Relief Act of 1997; verified against IRC §121(b).
+        "last_updated": "2026-07-02",
+        "update_cycle": "legislative",
+        "review_url": "https://www.law.cornell.edu/uscode/text/26/121",
     },
     "senior_bonus": {
         "last_updated": "2025-07-04",

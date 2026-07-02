@@ -169,6 +169,19 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
             f"value {h.value:,.0f}; basis {h.basis:,.0f}; "
             f"grow {h.growth_rate * 100:.2f}%{dist}{sale}",
             "assumed", "User input"))
+    for re_ in plan.real_estate:
+        sale = (f"; sell at {re_.sale_age}" if re_.sale_age is not None
+                else "; held to death (basis step-up)")
+        link = (f"; mortgage: {plan.liabilities[re_.liability_index].name}"
+                if re_.liability_index is not None
+                and re_.liability_index < len(plan.liabilities) else "")
+        nw = "" if re_.include_in_net_worth else "; excluded from net worth"
+        user_inputs.append((
+            f"Real estate: {re_.name} ({persons[re_.owner].name})",
+            f"value {re_.value:,.0f}; basis {re_.basis:,.0f}; "
+            f"appreciate {re_.appreciation * 100:.2f}%"
+            f"{'; primary (§121)' if re_.is_primary else '; investment'}{link}{sale}{nw}",
+            "assumed", "User input"))
     for label, val, kind, src in user_inputs:
         ws.cell(row=r, column=1, value=label)
         ws.cell(row=r, column=2, value=val)

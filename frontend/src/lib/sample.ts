@@ -8,6 +8,7 @@ import type {
   Person,
   PlanInput,
   PrivateHolding,
+  RealEstate,
 } from "./types";
 import { DEFAULT_RETURNS } from "./types";
 
@@ -117,6 +118,7 @@ export const SAMPLE_INPUT: PlanInput = {
   insurance_policies: [],
   annuities: [],
   private_holdings: [],
+  real_estate: [],
   annual_spending: 96_000,
   assumptions: {
     ...DEFAULT_ASSUMPTIONS,
@@ -199,6 +201,20 @@ export function newPrivateHolding(): PrivateHolding {
     annual_distribution: 0,
     distribution_kind: "ordinary",
     sale_age: null,
+  };
+}
+
+export function newRealEstate(liabilityIndex: number | null = null, name = "Home"): RealEstate {
+  return {
+    name,
+    owner: 0,
+    value: 0,
+    basis: 0,
+    appreciation: 0.03,
+    is_primary: true,
+    sale_age: null,
+    liability_index: liabilityIndex,
+    include_in_net_worth: true,
   };
 }
 

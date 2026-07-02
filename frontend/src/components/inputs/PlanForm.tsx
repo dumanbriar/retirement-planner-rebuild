@@ -9,6 +9,7 @@ import { IncomeStreamsSection } from "./IncomeStreamsSection";
 import { InsuranceSection } from "./InsuranceSection";
 import { AnnuitiesSection } from "./AnnuitiesSection";
 import { PrivateHoldingsSection } from "./PrivateHoldingsSection";
+import { RealEstateSection } from "./RealEstateSection";
 import { SpendingSection } from "./SpendingSection";
 import { AssumptionsSection } from "./AssumptionsSection";
 import { PlanIO } from "./PlanIO";
@@ -103,6 +104,13 @@ export function PlanForm({
           help="Private company shares or partnership interests. Illiquid — never sold to cover spending. Optional K-1 cash distributions are taxed each year; an optional liquidity event realizes the gain as LTCG; held to death the basis steps up (IRC §1014)."
         >
           <PrivateHoldingsSection {...sectionProps} />
+        </Card>
+
+        <Card
+          title="Real estate"
+          help="Homes and investment properties. Illiquid — never sold to cover spending. An optional sale pays off the linked mortgage and realizes the gain (primary residences exclude $250k/$500k under IRC §121); held to death the basis steps up (IRC §1014)."
+        >
+          <RealEstateSection {...sectionProps} />
         </Card>
 
         <Card
