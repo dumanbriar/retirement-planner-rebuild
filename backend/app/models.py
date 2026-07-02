@@ -272,6 +272,16 @@ class Assumptions(BaseModel):
     # owner is 70½+: excluded from AGI, counts toward the RMD, capped per
     # person at the indexed statutory limit (IRC §408(d)(8)).
     annual_qcd: float = Field(default=0, ge=0)
+    # Lifetime gifting schedule (today's dollars per household year), given
+    # out of the portfolio in retirement. Ages key off the primary person;
+    # None => from household retirement / until the survivor's death. The
+    # number of recipients sizes the annual-exclusion shelter (IRC §2503(b),
+    # per donee per living donor); the excess consumes the lifetime
+    # gift/estate exemption (IRC §2010) — tracked, and warned if exceeded.
+    annual_gifting: float = Field(default=0, ge=0)
+    gifting_start_age: Optional[int] = Field(default=None, ge=18, le=100)
+    gifting_end_age: Optional[int] = Field(default=None, ge=18, le=110)
+    gift_recipients: int = Field(default=1, ge=1, le=20)
 
 
 class PlanInput(BaseModel):

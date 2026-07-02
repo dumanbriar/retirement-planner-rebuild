@@ -29,6 +29,10 @@ export const DEFAULT_ASSUMPTIONS: Assumptions = {
   medicare_other_annual_per_person: 3500,
   pre_retirement_magi: null,
   annual_qcd: 0,
+  annual_gifting: 0,
+  gifting_start_age: null,
+  gifting_end_age: null,
+  gift_recipients: 1,
 };
 
 /** The Sam & Alex sample scenario (mirrors the backend's sample request). */

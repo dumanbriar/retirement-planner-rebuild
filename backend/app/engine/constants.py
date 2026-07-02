@@ -202,6 +202,17 @@ HSA_PENALTY_END_AGE = 65
 QCD_ANNUAL_LIMIT = 111_000  # 2026, per person
 QCD_START_AGE = 71          # whole-year approximation of 70½
 
+# ---------------------------------------------------------------------------
+# Lifetime gifting. The annual gift-tax exclusion (IRC §2503(b)) is $19,000
+# per donee per donor for 2026 (Rev. Proc. 2025-32; indexed in $1,000 steps).
+# Gifts beyond the exclusions consume the unified lifetime gift/estate
+# exemption (IRC §2010): $15,000,000 per person for 2026, made permanent by
+# OBBBA (P.L. 119-21) sec. 70106 and indexed for inflation after 2026. The
+# engine grows both from these 2026 bases at the plan inflation assumption.
+# ---------------------------------------------------------------------------
+GIFT_ANNUAL_EXCLUSION = 19_000          # 2026, per donee per donor
+GIFT_LIFETIME_EXEMPTION = 15_000_000    # 2026, per person (unified with estate)
+
 # Early-withdrawal additional tax on tax-deferred accounts before 59.5
 # (IRC sec. 72(t)). The engine applies it to tax-deferred withdrawals taken
 # before the owner's age-60 year (whole-year model) and flags it in output.
@@ -337,6 +348,18 @@ CONSTANT_METADATA: dict[str, dict[str, str]] = {
         "last_updated": "2025-11-01",
         "update_cycle": "annual-november",
         "review_url": "https://www.irs.gov/pub/irs-drop/n-25-67.pdf",
+    },
+    "gift_exclusion": {
+        # $19,000 per donee per donor for 2026 (unchanged from 2025).
+        "last_updated": "2026-07-02",
+        "update_cycle": "annual-october",
+        "review_url": "https://www.irs.gov/pub/irs-drop/rp-25-32.pdf",
+    },
+    "gift_lifetime_exemption": {
+        # $15,000,000 per person for 2026 (OBBBA sec. 70106; indexed after 2026).
+        "last_updated": "2026-07-02",
+        "update_cycle": "annual-october",
+        "review_url": "https://www.irs.gov/pub/irs-drop/rp-25-32.pdf",
     },
     "qcd_limit": {
         # $111,000 per person for 2026 (indexed annually since SECURE 2.0).

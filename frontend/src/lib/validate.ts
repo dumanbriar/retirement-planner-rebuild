@@ -154,6 +154,17 @@ export function validatePlanInput(input: PlanInput): FieldErrors {
   if (a.pre_retirement_magi != null && !(a.pre_retirement_magi >= 0))
     errors["assumptions.pre_retirement_magi"] = "Must be ≥ 0.";
   if (!(a.annual_qcd >= 0)) errors["assumptions.annual_qcd"] = "Must be ≥ 0.";
+  if (!(a.annual_gifting >= 0)) errors["assumptions.annual_gifting"] = "Must be ≥ 0.";
+  if (a.gifting_start_age != null && !inRange(a.gifting_start_age, 18, 100))
+    errors["assumptions.gifting_start_age"] = "Start age must be 18–100.";
+  if (a.gifting_end_age != null) {
+    if (!inRange(a.gifting_end_age, 18, 110))
+      errors["assumptions.gifting_end_age"] = "End age must be 18–110.";
+    else if (a.gifting_start_age != null && a.gifting_end_age < a.gifting_start_age)
+      errors["assumptions.gifting_end_age"] = "End age must be ≥ start age.";
+  }
+  if (!inRange(a.gift_recipients, 1, 20))
+    errors["assumptions.gift_recipients"] = "Recipients must be 1–20.";
 
   return errors;
 }

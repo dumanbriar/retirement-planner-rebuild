@@ -511,6 +511,28 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
                       "at the END of the plan: mid-plan, a surviving spouse is assumed to "
                       "inherit and continue every asset (spousal rollover/continuation), "
                       "with the charitable designation honored at the second death."})
+    if plan.assumptions.annual_gifting > 0:
+        ga = plan.assumptions
+        window = (f"ages {ga.gifting_start_age or 'retirement'}–"
+                  f"{ga.gifting_end_age or 'death'}")
+        notes.append({
+            "label": "Lifetime gifting",
+            "value": f"{ga.annual_gifting:,.0f}/yr (today's $), {window}, "
+                     f"{ga.gift_recipients} recipient(s)",
+            "kind": "modeled",
+            "source": "The scheduled amount (inflated) leaves the portfolio each "
+                      "retirement year within the age window (ages key off the primary "
+                      "person; gifting continues for a surviving spouse). The annual "
+                      "gift-tax exclusion (IRC §2503(b); $19,000 per donee per living "
+                      "donor in 2026, indexed — a couple gift-splits under §2513) "
+                      "shelters gifts up to recipients × donors × exclusion each year; "
+                      "the excess is a taxable gift that consumes the unified lifetime "
+                      "exemption (IRC §2010; $15,000,000 per person in 2026, permanent "
+                      "under OBBBA and indexed), which the Legacy view tracks. Gift TAX "
+                      "itself is NOT modeled — the plan warns if the exemption would be "
+                      "exhausted. Gifts follow the schedule even in shortfall years "
+                      "(a depleted plan shows the shortfall rather than skipping the "
+                      "gift). Gifts before household retirement are not modeled."})
     if any(getattr(s, "survivor_pct", 0) > 0 for s in plan.income_streams):
         notes.append({
             "label": "Pension/annuity survivor benefit", "value": "continues at set %",

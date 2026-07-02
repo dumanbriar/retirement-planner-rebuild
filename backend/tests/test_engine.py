@@ -1220,6 +1220,107 @@ def test_charitable_bequest_beats_heir_ird_on_tax():
     assert ird_tax(Beneficiary.charity) == 0
 
 
+# --------------------------------------------- lifetime gifting (Phase 8)
+def _solo_giver(annual_gifting: float, **akw) -> PlanInput:
+    a = dict(roth_conversion_strategy=ConversionStrategy.none,
+             annual_gifting=annual_gifting)
+    a.update(akw)
+    return PlanInput(
+        persons=[Person(name="Pat", current_age=60, retirement_age=62, death_age=85,
+                        ss_monthly_at_fra=2500, ss_claim_age=67)],
+        accounts=[Account(name="401k", type=AccountType.tax_deferred, owner=0,
+                          balance=5_000_000, annual_contribution=0,
+                          expected_return=0.05),
+                  Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                          balance=500_000, cost_basis=500_000, annual_contribution=0,
+                          expected_return=0.05)],
+        annual_spending=60_000,
+        assumptions=Assumptions(**a))
+
+
+def test_gift_constants():
+    # Rev. Proc. 2025-32 / OBBBA sec. 70106, 2026 values
+    assert C.GIFT_ANNUAL_EXCLUSION == 19_000
+    assert C.GIFT_LIFETIME_EXEMPTION == 15_000_000
+
+
+def test_gifts_follow_schedule_and_inflation():
+    # Default window: gifts start at household retirement (2028, Pat 62) and
+    # run through death; each year's gift is the today's-$ amount inflated.
+    rows = Simulator(_solo_giver(30_000), strategy=ConversionStrategy.none).run()[0]
+    by = {y.year: y for y in rows}
+    assert by[2027].gifts_made == 0                       # still accumulating
+    assert math.isclose(by[2028].gifts_made, 30_000 * 1.025 ** 2, abs_tol=0.5)
+    assert math.isclose(by[2040].gifts_made, 30_000 * 1.025 ** 14, abs_tol=0.5)
+
+
+def test_gifting_age_window():
+    rows = Simulator(_solo_giver(30_000, gifting_start_age=70, gifting_end_age=75),
+                     strategy=ConversionStrategy.none).run()[0]
+    by = {y.year: y for y in rows}
+    assert by[2035].gifts_made == 0     # age 69
+    assert by[2036].gifts_made > 0      # age 70
+    assert by[2041].gifts_made > 0      # age 75
+    assert by[2042].gifts_made == 0     # age 76
+
+
+def test_exclusion_vs_exemption_hand_check():
+    # Single donor, 1 recipient, 100k/yr (today's $): the exclusion shelters
+    # 19k/yr, so 81k/yr of taxable gifts accrue against the §2010 exemption.
+    # Retirement years 2028..2051 = 24 -> gifts 2,400,000; exemption 1,944,000
+    # (all in today's dollars).
+    sim = Simulator(_solo_giver(100_000), strategy=ConversionStrategy.none)
+    rows, m = sim.run()
+    assert math.isclose(sim.gifts_lifetime_real, 2_400_000, abs_tol=1)
+    assert math.isclose(sim.exemption_used_real, 24 * (100_000 - 19_000), abs_tol=1)
+    assert math.isclose(m.gifts_made_total_real, 2_400_000, abs_tol=1)
+    # legacy figures are nominal at the final year, deflating back exactly
+    legacy = sim.legacy
+    assert math.isclose(legacy.exemption_used / sim.infl(rows[-1].year),
+                        1_944_000, abs_tol=1)
+    # well inside the $15M exemption -> no warning
+    assert not any("exemption" in w for w in sim.warnings)
+
+
+def test_couple_gift_splitting_doubles_exclusion():
+    # 2 donors x 2 recipients shelter 76k/yr while both alive (§2513 gift
+    # splitting); after Sam dies (2064) one donor remains -> 38k sheltered,
+    # so a 76k/yr schedule accrues 38k/yr of taxable gifts for 2064-2067.
+    plan = couple_plan(assumptions=Assumptions(
+        roth_conversion_strategy=ConversionStrategy.none,
+        annual_gifting=76_000, gift_recipients=2))
+    sim = Simulator(plan, strategy=ConversionStrategy.none)
+    sim.run()
+    assert math.isclose(sim.exemption_used_real, 4 * 38_000, abs_tol=1)
+
+
+def test_exemption_exceeded_warns():
+    # 1M/yr to one recipient: (1M - 19k) * 24 yrs = 23.5M > the 15M exemption.
+    sim = Simulator(_solo_giver(1_000_000), strategy=ConversionStrategy.none)
+    sim.run()
+    assert any("exemption" in w and "§2010" in w for w in sim.warnings)
+
+
+def test_gifts_reduce_portfolio_and_conserve_wealth():
+    base = Simulator(_solo_giver(0), strategy=ConversionStrategy.none).run()[1]
+    rows, m = Simulator(_solo_giver(50_000), strategy=ConversionStrategy.none).run()
+    # decades of real gifts leave materially less ending wealth
+    assert base.ending_net_worth_real - m.ending_net_worth_real > 800_000
+    # per-year wealth conservation with gifts as an explicit outflow
+    for y in rows:
+        if y.phase != "retirement":
+            continue
+        start = sum(a.start_balance for a in y.accounts)
+        growth = sum(a.growth for a in y.accounts)
+        end = sum(a.end_balance for a in y.accounts)
+        outflow = (y.spend_goal + y.healthcare_cost + y.total_tax
+                   + y.debt_payments + y.home_purchase + y.qcd_amount
+                   + y.gifts_made)
+        inflow = y.ss_total + y.other_income
+        assert math.isclose(end, start + growth - outflow + inflow,
+                            rel_tol=0.01, abs_tol=1500), f"{y.year}"
+
+
 # -------------------------------- surplus reinvestment conservation (regression)
 def test_no_phantom_surplus_from_rmds():
     # Regression: forced RMDs were double-counted as available resources in the

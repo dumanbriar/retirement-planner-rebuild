@@ -115,6 +115,14 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
         user_inputs.append((
             "Annual charitable giving from IRAs (QCD, today's $)", a.annual_qcd,
             "assumed", "User input; modeled per IRC §408(d)(8) — see notes below"))
+    if a.annual_gifting > 0:
+        user_inputs.append((
+            "Annual lifetime gifting (today's $)",
+            f"{a.annual_gifting:,.0f}/yr, ages "
+            f"{a.gifting_start_age or 'retirement'}-{a.gifting_end_age or 'death'}, "
+            f"{a.gift_recipients} recipient(s)",
+            "assumed", "User input; exclusion/exemption per IRC §2503(b)/§2010 — "
+                       "see notes below"))
     for i, p in enumerate(persons):
         user_inputs += [
             (f"{p.name}: current age", p.current_age, "assumed", "User input"),
@@ -242,7 +250,7 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
                ["Filing", "Contributions", "Growth (net of drag)",
                 "Spend goal", "Debt pmts", "Home purchase", "Healthcare",
                 "ACA subsidy", "IRMAA", "SS gross", "Taxable SS", "Other income",
-                "RMD", "QCD", "W/D cash", "W/D taxable", "W/D tax-def", "W/D Roth",
+                "RMD", "QCD", "Gifts", "W/D cash", "W/D taxable", "W/D tax-def", "W/D Roth",
                 "W/D HSA", "Roth conversion", "Realized gains", "Dividends",
                 "Interest", "AGI", "MAGI", "Deductions", "Taxable income",
                 "Federal tax", "of which LTCG tax", "NIIT", "State tax",
@@ -265,7 +273,8 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
                  y.spend_goal, y.debt_payments, y.home_purchase,
                  y.healthcare_cost,
                  y.aca_subsidy, y.irmaa_surcharge, y.ss_total, y.taxable_ss,
-                 y.other_income, y.rmd_total, y.qcd_amount, wbt.get("cash", 0.0),
+                 y.other_income, y.rmd_total, y.qcd_amount, y.gifts_made,
+                 wbt.get("cash", 0.0),
                  wbt.get("taxable", 0.0), wbt.get("tax_deferred", 0.0),
                  wbt.get("roth", 0.0), hsa_wd, y.roth_conversion,
                  y.realized_gains, y.dividends, y.interest, y.agi, y.magi,
@@ -411,6 +420,10 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
             ("Net to heirs (today's $)", m.net_to_heirs_real),
             ("To charity (today's $)", m.to_charity_real),
             ("Lifetime gifts (today's $)", m.gifts_made_total_real),
+            ("Gift/estate exemption consumed by gifts (today's $)",
+             lg.exemption_used / ((1 + plan.assumptions.inflation)
+                                  ** (lg.at_death_year - result.years[0].year))
+             if result.years else lg.exemption_used),
         ]
         for label, val in totals:
             ws.cell(row=r, column=1, value=label).font = Font(bold=True)

@@ -678,6 +678,7 @@ class Simulator:
             if retired:
                 row.legacy_distributions += self._annuity_payout \
                     + self._priv_distribution
+                self.track_gifts(year, row.gifts_made)
             row.total_assets = (sum(x.balance for x in self.accounts)
                                 + sum(p.cash_value for p in self.policies if p.active)
                                 + sum(a.balance for a in self.annuities if a.active)
@@ -783,18 +784,63 @@ class Simulator:
                 estate_deductible=(dest == Beneficiary.charity.value)))
         # debts reduce what heirs ultimately receive
         to_heirs_net -= last.total_liabilities
+        # gifting totals are accumulated in today's dollars (track_gifts);
+        # express them here in end-of-plan nominal terms, consistent with the
+        # other LegacyResult figures (metrics deflate by the final year).
         legacy = LegacyResult(
             at_death_year=last.year, assets=assets,
             to_heirs_gross=to_heirs_gross, to_heirs_net=to_heirs_net,
             to_charity=to_charity, ird_tax=ird_tax,
-            gifts_lifetime=getattr(self, "gifts_lifetime", 0.0),
-            exemption_used=getattr(self, "exemption_used", 0.0))
+            gifts_lifetime=getattr(self, "gifts_lifetime_real", 0.0)
+            * self.infl(last.year),
+            exemption_used=getattr(self, "exemption_used_real", 0.0)
+            * self.infl(last.year))
         return to_heirs_net, legacy
 
     def annual_gifts(self, year: int) -> float:
-        """Lifetime gifts out of the portfolio this year (today's $ * inflation).
-        Phase-1 hook: returns 0 until Phase 8 (lifetime gifting) populates it."""
-        return 0.0
+        """Lifetime gifts out of the portfolio this year (today's $ * inflation),
+        per the household gifting schedule. The hook feeds the retirement
+        spending need, so gifts are modeled in retirement years; the schedule's
+        ages key off the primary person (None => from household retirement,
+        through the survivor's last year)."""
+        a = self.a
+        if a.annual_gifting <= 0:
+            return 0.0
+        age = self.age(0, year)  # notional primary age; valid past their death
+        if a.gifting_start_age is not None and age < a.gifting_start_age:
+            return 0.0
+        if a.gifting_end_age is not None and age > a.gifting_end_age:
+            return 0.0
+        return a.annual_gifting * self.infl(year)
+
+    def track_gifts(self, year: int, gifts: float) -> None:
+        """Accumulate lifetime-gifting totals (in today's dollars): the gifts
+        themselves, and the portion beyond the annual exclusions that consumes
+        the unified lifetime exemption. The exclusion shelters (indexed)
+        $19,000 per donee per LIVING donor (IRC §2503(b); a couple gift-splits
+        under §2513); only the excess is a taxable gift charged against the
+        §2010 exemption. No gift tax is modeled — the plan warns instead if
+        the exemption is exhausted."""
+        if gifts <= 0:
+            return
+        infl = self.infl(year)
+        donors = sum(1 for i in range(len(self.persons)) if self.alive(i, year))
+        shelter = C.GIFT_ANNUAL_EXCLUSION * infl * self.a.gift_recipients * donors
+        self.gifts_lifetime_real = getattr(self, "gifts_lifetime_real", 0.0) \
+            + gifts / infl
+        self.exemption_used_real = getattr(self, "exemption_used_real", 0.0) \
+            + max(0.0, gifts - shelter) / infl
+        # the §2010 exemption is indexed, so in today's dollars it stays at the
+        # 2026 base — compare real use against 15M per (original) person
+        exemption_real = C.GIFT_LIFETIME_EXEMPTION * len(self.persons)
+        if self.exemption_used_real > exemption_real:
+            msg = ("Lifetime gifts beyond the annual exclusions exceed the "
+                   "unified lifetime gift/estate exemption "
+                   f"(${C.GIFT_LIFETIME_EXEMPTION:,.0f} per person, IRC §2010) — "
+                   "gift tax would be owed on the excess, which this plan does "
+                   "NOT model. Consider more recipients or smaller annual gifts.")
+            if msg not in self.warnings:
+                self.warnings.append(msg)
 
     def prepare_insurance(self, year: int) -> None:
         """Process whole-life policies for the year, BEFORE the phase step so

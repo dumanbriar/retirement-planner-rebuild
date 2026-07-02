@@ -158,6 +158,38 @@ export function LegacyPanel({
               </td>
             </tr>
           )}
+          {legacy.gifts_lifetime > 0 && (
+            <>
+              <tr className="bg-slate-50 text-slate-600">
+                <td className="px-4 py-2.5" colSpan={5}>
+                  <span className="inline-flex items-center gap-1">
+                    Lifetime gifts already given (not part of the estate)
+                    <InfoTip
+                      wide
+                      content="Total gifted out of the portfolio during the plan per the gifting schedule. These dollars reached recipients during your lifetime, so they don't appear in the estate above."
+                    />
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 text-right tabular-nums" title={fmtCurrencyExact(v(legacy.gifts_lifetime))}>
+                  {fmtCurrency(v(legacy.gifts_lifetime))}
+                </td>
+              </tr>
+              <tr className="bg-slate-50 text-slate-600">
+                <td className="px-4 py-2.5" colSpan={5}>
+                  <span className="inline-flex items-center gap-1">
+                    Lifetime gift/estate exemption consumed
+                    <InfoTip
+                      wide
+                      content="Gifts beyond the annual exclusions ($19,000 per recipient per living donor in 2026, IRC §2503(b)) are taxable gifts that consume the unified lifetime exemption ($15,000,000 per person in 2026, IRC §2010) — reducing what shelters the estate from transfer tax. Gift/estate tax itself is not modeled; the plan warns if the exemption would be exhausted."
+                    />
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 text-right tabular-nums" title={fmtCurrencyExact(v(legacy.exemption_used))}>
+                  {legacy.exemption_used > 0 ? fmtCurrency(v(legacy.exemption_used)) : "—"}
+                </td>
+              </tr>
+            </>
+          )}
         </tfoot>
       </table>
     </Card>

@@ -233,6 +233,14 @@ export interface Assumptions {
   pre_retirement_magi: number | null;
   /** Annual QCDs from IRAs after 70½ (today's $): AGI-excluded, count toward RMDs. */
   annual_qcd: number;
+  /** Lifetime gifting schedule (today's $/yr) given out of the portfolio in retirement. */
+  annual_gifting: number;
+  /** Primary person's age gifting starts (null => at household retirement). */
+  gifting_start_age: number | null;
+  /** Primary person's age gifting ends (null => through the survivor's death). */
+  gifting_end_age: number | null;
+  /** Number of gift recipients — sizes the §2503(b) annual-exclusion shelter. */
+  gift_recipients: number;
 }
 
 export interface PlanInput {
