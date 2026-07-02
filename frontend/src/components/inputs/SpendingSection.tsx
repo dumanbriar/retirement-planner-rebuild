@@ -44,6 +44,15 @@ export function SpendingSection({ input, onChange, errors, dense }: SectionProps
           />
         )}
       </div>
+      <NumberField
+        label="Annual charitable giving from IRAs (QCD, today's $)"
+        value={a.annual_qcd}
+        onChange={(annual_qcd) => setA({ annual_qcd })}
+        min={0}
+        prefix="$"
+        error={errors["assumptions.annual_qcd"]}
+        help="Qualified charitable distributions: direct IRA-to-charity gifts once the owner is 70½ (modeled from the age-71 year). Excluded from AGI — also lowering IRMAA and ACA exposure — and counts toward the RMD (IRC §408(d)(8)). Capped per person at the statutory limit ($111,000 in 2026, indexed). Grows with inflation; drawn only from tax-deferred accounts."
+      />
       <CheckboxField
         label="Optimize Social Security claiming ages"
         checked={a.optimize_ss_claiming}

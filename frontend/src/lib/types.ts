@@ -68,6 +68,8 @@ export interface Account {
   annual_contribution: number;
   /** null => engine default for the account type. */
   expected_return: number | null; // -0.10..0.20
+  /** Terminal estate destination; charity passes income-tax-free (default heirs). */
+  beneficiary?: Beneficiary;
 }
 
 export interface Liability {
@@ -108,6 +110,7 @@ export interface InsurancePolicy {
   death_benefit: number; // face amount, level nominal
   premiums_paid_to_date: number; // basis for surrender gain
   surrender_at_age: number | null; // optional lapse
+  beneficiary?: Beneficiary; // terminal estate destination
 }
 
 /** Non-qualified deferred annuity: tax-deferred accumulation then a period-certain payout. */
@@ -123,6 +126,7 @@ export interface Annuity {
   purchase_age: number | null;
   /** Lump sum drawn from the portfolio at purchase_age (nominal). */
   purchase_amount: number;
+  beneficiary?: Beneficiary; // terminal estate destination
 }
 
 /** How a private holding's K-1 cash distribution is taxed each year. */
@@ -148,6 +152,7 @@ export interface PrivateHolding {
   distribution_kind: DistributionKind;
   /** Optional liquidity event: sell the entire holding at this age (null => hold to death). */
   sale_age: number | null;
+  beneficiary?: Beneficiary; // terminal estate destination
 }
 
 /**
@@ -170,6 +175,7 @@ export interface RealEstate {
   liability_index: number | null;
   /** Exclude the value from net worth / total assets (legacy view still shows it). */
   include_in_net_worth: boolean;
+  beneficiary?: Beneficiary; // terminal estate destination
 }
 
 /** How an asset is taxed when it passes to its beneficiary at death. */
@@ -225,6 +231,8 @@ export interface Assumptions {
   medicare_other_annual_per_person: number;
   /** Household MAGI in last two working years (IRMAA 2-yr lookback). null => engine estimate. */
   pre_retirement_magi: number | null;
+  /** Annual QCDs from IRAs after 70½ (today's $): AGI-excluded, count toward RMDs. */
+  annual_qcd: number;
 }
 
 export interface PlanInput {
@@ -411,6 +419,8 @@ export interface LegacyAssetResult {
   gross: number;
   tax: number;
   net: number;
+  /** Charitable bequests qualify for the estate-tax deduction (IRC §2055). */
+  estate_deductible?: boolean;
 }
 
 export interface LegacyResult {

@@ -9,6 +9,7 @@ import {
   TextField,
 } from "../ui/fields";
 import { removeAt, type SectionProps, updateAt } from "./sectionProps";
+import { BequestToggle } from "./BequestToggle";
 import { ModelingDisclosure } from "./ModelingDisclosure";
 
 export function InsuranceSection({ input, onChange, errors, dense }: SectionProps) {
@@ -113,8 +114,14 @@ export function InsuranceSection({ input, onChange, errors, dense }: SectionProp
                 help="Optional: age to surrender the policy for its cash value (gain over premiums paid is taxed as ordinary income). Leave blank to hold for life."
               />
             </div>
-            <div className="mt-2 flex items-center justify-between">
-              <ModelingDisclosure assetKey="insurance" />
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-4">
+                <BequestToggle
+                  value={p.beneficiary}
+                  onChange={(beneficiary) => set(i, { beneficiary })}
+                />
+                <ModelingDisclosure assetKey="insurance" />
+              </div>
               <button
                 type="button"
                 onClick={() =>

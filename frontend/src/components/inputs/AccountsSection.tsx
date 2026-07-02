@@ -11,6 +11,7 @@ import {
 } from "../ui/fields";
 import { removeAt, type SectionProps, updateAt } from "./sectionProps";
 import { ModelingDisclosure } from "./ModelingDisclosure";
+import { BequestToggle } from "./BequestToggle";
 
 const TYPE_OPTIONS = (Object.keys(ACCOUNT_TYPE_LABELS) as AccountType[]).map((t) => ({
   value: t,
@@ -132,8 +133,12 @@ export function AccountsSection({ input, onChange, errors, dense }: SectionProps
                 />
               )}
               <div
-                className={`flex items-end justify-end ${dense ? "col-span-2" : "lg:col-span-6"}`}
+                className={`flex items-end justify-between gap-2 ${dense ? "col-span-2" : "lg:col-span-6"}`}
               >
+                <BequestToggle
+                  value={a.beneficiary}
+                  onChange={(beneficiary) => setAccount(i, { beneficiary })}
+                />
                 <button
                   type="button"
                   onClick={() => onChange({ ...input, accounts: removeAt(input.accounts, i) })}

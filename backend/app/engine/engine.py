@@ -626,7 +626,7 @@ class Simulator:
                 cost_basis=x.basis if x.spec.type == AccountType.taxable else None,
                 asset_class="account",
                 transfer_character=ACCOUNT_TRANSFER_CHARACTER[x.spec.type].value,
-                beneficiary=Beneficiary.heirs.value,
+                beneficiary=x.spec.beneficiary.value,
             ) for x in self.accounts]
             # whole-life policies report their cash value (their balance-sheet
             # value while in force); the death benefit is the terminal/legacy value.
@@ -640,7 +640,7 @@ class Simulator:
                 death_benefit=p.spec.death_benefit,
                 asset_class="insurance",
                 transfer_character=TransferCharacter.tax_free.value,
-                beneficiary=Beneficiary.heirs.value,
+                beneficiary=p.spec.beneficiary.value,
             ) for p in self.policies if p.active]
             # deferred annuities (accumulation value, or remaining payout value)
             row.accounts += [AccountYear(
@@ -650,7 +650,7 @@ class Simulator:
                 end_balance=a.balance, cost_basis=a.basis,
                 asset_class="annuity",
                 transfer_character=TransferCharacter.ird.value,
-                beneficiary=Beneficiary.heirs.value,
+                beneficiary=a.spec.beneficiary.value,
             ) for a in self.annuities if a.active or a.payout > 0]
             # private holdings (value, basis, this year's K-1 / sale flows)
             row.accounts += [AccountYear(
@@ -660,7 +660,7 @@ class Simulator:
                 growth=h.growth, end_balance=h.value, cost_basis=h.basis,
                 asset_class="private",
                 transfer_character=TransferCharacter.step_up.value,
-                beneficiary=Beneficiary.heirs.value,
+                beneficiary=h.spec.beneficiary.value,
             ) for h in self.holdings if h.active or h.sale_proceeds > 0]
             # real estate (value, basis, this year's appreciation / sale)
             row.accounts += [AccountYear(
@@ -670,7 +670,7 @@ class Simulator:
                 end_balance=r.value, cost_basis=r.basis,
                 asset_class="realestate",
                 transfer_character=TransferCharacter.step_up.value,
-                beneficiary=Beneficiary.heirs.value,
+                beneficiary=r.spec.beneficiary.value,
             ) for r in self.props if r.active or r.sale_proceeds > 0]
             row.premiums_paid = self._ins_premium if retired else 0.0
             row.legacy_purchases = self._annuity_purchase
@@ -777,7 +777,10 @@ class Simulator:
             assets.append(LegacyAssetResult(
                 name=x.name, asset_class=x.asset_class,
                 transfer_character=char, beneficiary=dest,
-                gross=gross, tax=tax, net=gross - tax))
+                gross=gross, tax=tax, net=gross - tax,
+                # charitable bequests qualify for the estate-tax charitable
+                # deduction (IRC §2055) — flagged for the estate-tax phase
+                estate_deductible=(dest == Beneficiary.charity.value)))
         # debts reduce what heirs ultimately receive
         to_heirs_net -= last.total_liabilities
         legacy = LegacyResult(
@@ -791,11 +794,6 @@ class Simulator:
     def annual_gifts(self, year: int) -> float:
         """Lifetime gifts out of the portfolio this year (today's $ * inflation).
         Phase-1 hook: returns 0 until Phase 8 (lifetime gifting) populates it."""
-        return 0.0
-
-    def qcd_total(self, year: int) -> float:
-        """Qualified charitable distributions from tax-deferred accounts this
-        year (IRC §408(d)(8)). Phase-1 hook: returns 0 until Phase 7."""
         return 0.0
 
     def prepare_insurance(self, year: int) -> None:
@@ -1250,9 +1248,36 @@ class Simulator:
                 acct.contribution = cur_contrib
             scratch = YearScratch()
 
-            # 1) mandatory RMDs
+            # 0) qualified charitable distributions (IRC §408(d)(8)): direct
+            # IRA-to-charity transfers by owners 70½+ (modeled as the age-71
+            # year). Excluded from AGI — the draw reduces the balance and is
+            # recorded on the account, but never enters ordinary income or the
+            # withdrawal resources (the money goes to charity, not spending).
+            # Capped per person at the indexed statutory limit.
+            qcd_by_person = [0.0] * len(self.persons)
+            qcd_target = a.annual_qcd * scale
+            if qcd_target > 0:
+                cap = C.QCD_ANNUAL_LIMIT * scale
+                for i in range(len(self.persons)):
+                    if ages[i] is None or ages[i] < C.QCD_START_AGE:
+                        continue
+                    want = min(qcd_target - sum(qcd_by_person), cap)
+                    for acct in self.accounts:
+                        if want <= 0.005:
+                            break
+                        if acct.spec.type == AccountType.tax_deferred \
+                                and acct.owner == i:
+                            take = min(acct.balance, want)
+                            acct.balance -= take
+                            acct.withdrawal += take
+                            qcd_by_person[i] += take
+                            want -= take
+            qcd_total = sum(qcd_by_person)
+
+            # 1) mandatory RMDs. A QCD counts toward the owner's RMD for the
+            # year (§408(d)(8)), so only the excess is forced out as taxable.
             for i, amt in enumerate(rmds):
-                remaining = amt
+                remaining = max(0.0, amt - qcd_by_person[i])
                 for acct in self.accounts:
                     if acct.spec.type == AccountType.tax_deferred and acct.owner == i \
                             and remaining > 0:
@@ -1306,7 +1331,10 @@ class Simulator:
             need = (spend_goal + debt_payments + home_purchase + healthcare_net
                     + tax_guess + self.annual_gifts(year) + self._ins_premium
                     + self._annuity_purchase)
-            resources = (ss_total + other_taxable + other_nontaxable + rmd_total
+            # only the RMD portion NOT satisfied by QCDs is spendable cash
+            rmd_spendable = sum(max(0.0, rmds[i] - qcd_by_person[i])
+                                for i in range(len(self.persons)))
+            resources = (ss_total + other_taxable + other_nontaxable + rmd_spendable
                          + self._annuity_payout + self._priv_distribution)
             gap = need + scratch.penalties - resources
             if gap > 0:
@@ -1402,6 +1430,6 @@ class Simulator:
             effective_rate=(tax_res.total / tax_res.agi) if tax_res.agi > 0 else 0.0,
             flags=sorted(set(scratch.flags)),
             gifts_made=self.annual_gifts(year),
-            qcd_amount=self.qcd_total(year),
+            qcd_amount=qcd_total,
         )
         return row, tax_guess

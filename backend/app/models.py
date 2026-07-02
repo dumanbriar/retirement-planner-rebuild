@@ -85,6 +85,9 @@ class Account(BaseModel):
     cost_basis: Optional[float] = Field(default=None, ge=0)
     annual_contribution: float = Field(default=0, ge=0)
     expected_return: Optional[float] = Field(default=None, ge=-0.10, le=0.20)
+    # Who receives this account at the terminal estate settlement. A charity
+    # destination passes income-tax-free out of the estate (estate-deductible).
+    beneficiary: Beneficiary = Beneficiary.heirs
 
     def rate(self) -> float:
         return self.expected_return if self.expected_return is not None else DEFAULT_RETURNS[self.type]
@@ -145,6 +148,7 @@ class InsurancePolicy(BaseModel):
     death_benefit: float = Field(ge=0)                   # face amount, level nominal
     premiums_paid_to_date: float = Field(default=0, ge=0)  # basis for surrender gain
     surrender_at_age: Optional[int] = Field(default=None, ge=30, le=110)  # optional lapse
+    beneficiary: Beneficiary = Beneficiary.heirs  # terminal estate destination
 
 
 class Annuity(BaseModel):
@@ -165,6 +169,7 @@ class Annuity(BaseModel):
     # basis. None => the annuity is already owned today (uses balance/basis above).
     purchase_age: Optional[int] = Field(default=None, ge=40, le=90)
     purchase_amount: float = Field(default=0, ge=0)
+    beneficiary: Beneficiary = Beneficiary.heirs  # terminal estate destination
 
 
 class DistributionKind(str, Enum):
@@ -192,6 +197,7 @@ class PrivateHolding(BaseModel):
     distribution_kind: DistributionKind = DistributionKind.ordinary
     # Optional liquidity event: sell the entire holding at this age.
     sale_age: Optional[int] = Field(default=None, ge=18, le=100)
+    beneficiary: Beneficiary = Beneficiary.heirs  # terminal estate destination
 
 
 class RealEstate(BaseModel):
@@ -219,6 +225,7 @@ class RealEstate(BaseModel):
     # not to count the roof over their head). Sale proceeds and the at-death
     # legacy still appear.
     include_in_net_worth: bool = True
+    beneficiary: Beneficiary = Beneficiary.heirs  # terminal estate destination
 
 
 class ConversionStrategy(str, Enum):
@@ -260,6 +267,11 @@ class Assumptions(BaseModel):
     # first two Medicare years via the 2-year lookback). None => engine
     # assumes 1.5x annual spending, labeled as an estimate.
     pre_retirement_magi: Optional[float] = Field(default=None, ge=0)
+    # Annual qualified charitable distributions (QCDs), today's dollars per
+    # household year. Given directly from tax-deferred accounts once each
+    # owner is 70½+: excluded from AGI, counts toward the RMD, capped per
+    # person at the indexed statutory limit (IRC §408(d)(8)).
+    annual_qcd: float = Field(default=0, ge=0)
 
 
 class PlanInput(BaseModel):
@@ -443,6 +455,9 @@ class LegacyAssetResult(BaseModel):
     gross: float               # value passing (today's dollars)
     tax: float                 # heir income tax (IRD); 0 for step-up/tax-free
     net: float                 # gross - tax
+    # Charitable bequests qualify for the estate-tax charitable deduction
+    # (IRC §2055) — flagged here for the future estate-tax phase.
+    estate_deductible: bool = False
 
 
 class LegacyResult(BaseModel):

@@ -10,6 +10,7 @@ import {
 } from "../ui/fields";
 import { removeAt, type SectionProps, updateAt } from "./sectionProps";
 import { ModelingDisclosure } from "./ModelingDisclosure";
+import { BequestToggle } from "./BequestToggle";
 
 export function AnnuitiesSection({ input, onChange, errors, dense }: SectionProps) {
   const ownerOptions = input.persons.map((p, i) => ({ value: i, label: p.name || `Person ${i + 1}` }));
@@ -126,6 +127,10 @@ export function AnnuitiesSection({ input, onChange, errors, dense }: SectionProp
                       : { purchase_age: null })
                   }
                   help="Model buying this annuity later with a lump sum from the portfolio, instead of already owning it."
+                />
+                <BequestToggle
+                  value={a.beneficiary}
+                  onChange={(beneficiary) => set(i, { beneficiary })}
                 />
                 <ModelingDisclosure assetKey="annuity" />
               </div>

@@ -189,6 +189,19 @@ SEC121_EXCLUSION = {"single": 250_000, "mfj": 500_000}
 HSA_PENALTY_RATE = 0.20
 HSA_PENALTY_END_AGE = 65
 
+# ---------------------------------------------------------------------------
+# Qualified charitable distributions (IRC §408(d)(8)): direct IRA-to-charity
+# transfers by owners age 70½+ are excluded from gross income up to a
+# per-person annual cap, and count toward the RMD. SECURE 2.0 sec. 307
+# indexed the original $100,000 cap for tax years after 2023 ($105k 2024,
+# $108k 2025, $111k 2026 per IRS Notice 2025-67). The engine grows the 2026
+# value at the plan inflation assumption. The age test is 70½ exactly; the
+# whole-year engine models it as the age-71 year (documented approximation,
+# consistent with 59½ -> 60).
+# ---------------------------------------------------------------------------
+QCD_ANNUAL_LIMIT = 111_000  # 2026, per person
+QCD_START_AGE = 71          # whole-year approximation of 70½
+
 # Early-withdrawal additional tax on tax-deferred accounts before 59.5
 # (IRC sec. 72(t)). The engine applies it to tax-deferred withdrawals taken
 # before the owner's age-60 year (whole-year model) and flags it in output.
@@ -322,6 +335,12 @@ CONSTANT_METADATA: dict[str, dict[str, str]] = {
     },
     "roth_ira_phaseout": {
         "last_updated": "2025-11-01",
+        "update_cycle": "annual-november",
+        "review_url": "https://www.irs.gov/pub/irs-drop/n-25-67.pdf",
+    },
+    "qcd_limit": {
+        # $111,000 per person for 2026 (indexed annually since SECURE 2.0).
+        "last_updated": "2026-07-02",
         "update_cycle": "annual-november",
         "review_url": "https://www.irs.gov/pub/irs-drop/n-25-67.pdf",
     },

@@ -28,6 +28,7 @@ export const DEFAULT_ASSUMPTIONS: Assumptions = {
   pre65_oop_annual_per_person: 2500,
   medicare_other_annual_per_person: 3500,
   pre_retirement_magi: null,
+  annual_qcd: 0,
 };
 
 /** The Sam & Alex sample scenario (mirrors the backend's sample request). */
@@ -150,6 +151,7 @@ export function newAccount(): Account {
     cost_basis: null,
     annual_contribution: 0,
     expected_return: DEFAULT_RETURNS.tax_deferred,
+    beneficiary: "heirs",
   };
 }
 
@@ -188,6 +190,7 @@ export function newInsurancePolicy(): InsurancePolicy {
     death_benefit: 0,
     premiums_paid_to_date: 0,
     surrender_at_age: null,
+    beneficiary: "heirs",
   };
 }
 
@@ -201,6 +204,7 @@ export function newPrivateHolding(): PrivateHolding {
     annual_distribution: 0,
     distribution_kind: "ordinary",
     sale_age: null,
+    beneficiary: "heirs",
   };
 }
 
@@ -215,6 +219,7 @@ export function newRealEstate(liabilityIndex: number | null = null, name = "Home
     sale_age: null,
     liability_index: liabilityIndex,
     include_in_net_worth: true,
+    beneficiary: "heirs",
   };
 }
 
@@ -229,5 +234,6 @@ export function newAnnuity(): Annuity {
     payout_years: 20,
     purchase_age: null,
     purchase_amount: 0,
+    beneficiary: "heirs",
   };
 }

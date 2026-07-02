@@ -153,6 +153,7 @@ export function validatePlanInput(input: PlanInput): FieldErrors {
     errors["assumptions.medicare_other_annual_per_person"] = "Must be ≥ 0.";
   if (a.pre_retirement_magi != null && !(a.pre_retirement_magi >= 0))
     errors["assumptions.pre_retirement_magi"] = "Must be ≥ 0.";
+  if (!(a.annual_qcd >= 0)) errors["assumptions.annual_qcd"] = "Must be ≥ 0.";
 
   return errors;
 }

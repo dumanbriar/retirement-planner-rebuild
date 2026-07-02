@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import copy
 
-from ..models import (Account, AccountType, AccountVehicle,
+from ..models import (Account, AccountType, AccountVehicle, Beneficiary,
                       ContributionSplitCell, ConversionStrategy, PlanInput,
                       PlanResult, SensitivityRow, SSGridCell, StrategyComparison)
 from . import constants as C
@@ -473,6 +473,44 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
                       "view at death. NOT modeled: depreciation recapture on rentals "
                       "(§1250), §1031 exchanges, property tax/upkeep (fold into spending), "
                       "rental income (add an income stream), §121 ownership/use tests."})
+    if plan.assumptions.annual_qcd > 0:
+        notes.append({
+            "label": "Qualified charitable distributions",
+            "value": f"{plan.assumptions.annual_qcd:,.0f}/yr (today's $)",
+            "kind": "modeled",
+            "source": "Direct IRA-to-charity transfers (IRC §408(d)(8)): excluded from "
+                      "gross income (so they never touch AGI/MAGI — also lowering IRMAA "
+                      "and ACA exposure) and counted toward the year's RMD. Modeled from "
+                      "each owner's age-71 year (a whole-year approximation of the "
+                      "statutory 70½ test, like the engine's 59½→60 convention), capped "
+                      "per person at the indexed statutory limit ($111,000 in 2026, IRS "
+                      "Notice 2025-67; indexed at the plan inflation assumption), and "
+                      "drawn only from tax-deferred accounts. The gift amount grows with "
+                      "inflation. No itemized charitable deduction is modeled — a QCD's "
+                      "exclusion replaces it (and the engine assumes the standard "
+                      "deduction throughout)."})
+    _charity_bequests = ([a.name for a in plan.accounts if a.beneficiary == Beneficiary.charity]
+                         + [p.name for p in plan.insurance_policies
+                            if p.beneficiary == Beneficiary.charity]
+                         + [an.name for an in plan.annuities
+                            if an.beneficiary == Beneficiary.charity]
+                         + [h.name for h in plan.private_holdings
+                            if h.beneficiary == Beneficiary.charity]
+                         + [r.name for r in plan.real_estate
+                            if r.beneficiary == Beneficiary.charity])
+    if _charity_bequests:
+        notes.append({
+            "label": "Charitable bequests",
+            "value": ", ".join(_charity_bequests),
+            "kind": "modeled",
+            "source": "Assets left to charity pass income-tax-free out of the estate at "
+                      "the terminal settlement — a charity pays no income tax on IRD, so "
+                      "bequeathing tax-deferred dollars to charity and step-up/tax-free "
+                      "assets to heirs is the classic ordering. Flagged estate-deductible "
+                      "(IRC §2055) for the future estate-tax phase. Bequests are settled "
+                      "at the END of the plan: mid-plan, a surviving spouse is assumed to "
+                      "inherit and continue every asset (spousal rollover/continuation), "
+                      "with the charitable designation honored at the second death."})
     if any(getattr(s, "survivor_pct", 0) > 0 for s in plan.income_streams):
         notes.append({
             "label": "Pension/annuity survivor benefit", "value": "continues at set %",

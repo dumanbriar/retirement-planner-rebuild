@@ -111,6 +111,10 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
     user_inputs = [
         ("Annual retirement spending (today's $)", plan.annual_spending, "assumed", "User input"),
     ]
+    if a.annual_qcd > 0:
+        user_inputs.append((
+            "Annual charitable giving from IRAs (QCD, today's $)", a.annual_qcd,
+            "assumed", "User input; modeled per IRC §408(d)(8) — see notes below"))
     for i, p in enumerate(persons):
         user_inputs += [
             (f"{p.name}: current age", p.current_age, "assumed", "User input"),
@@ -126,7 +130,8 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
             f"Account: {acc.name} ({acc.type.value}, {persons[acc.owner].name})",
             f"balance {acc.balance:,.0f}; contrib {acc.annual_contribution:,.0f}/yr; "
             f"return {acc.rate() * 100:.2f}%"
-            + (f"; basis {acc.cost_basis:,.0f}" if acc.cost_basis is not None else ""),
+            + (f"; basis {acc.cost_basis:,.0f}" if acc.cost_basis is not None else "")
+            + ("; bequest -> charity" if acc.beneficiary.value == "charity" else ""),
             "assumed", "User input"))
     for l in plan.liabilities:
         future = (f"; starts age {l.start_age}, down payment {l.down_payment:,.0f}"
@@ -150,14 +155,16 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
             f"Insurance: {ip.name} ({persons[ip.owner].name})",
             f"death benefit {ip.death_benefit:,.0f}; cash value {ip.cash_value:,.0f} "
             f"@ {ip.cash_value_return * 100:.2f}%; premium {ip.annual_premium:,.0f}/yr"
-            f"{paid_up}{surr} (level nominal)",
+            f"{paid_up}{surr} (level nominal)"
+            + ("; bequest -> charity" if ip.beneficiary.value == "charity" else ""),
             "assumed", "User input"))
     for an in plan.annuities:
         user_inputs.append((
             f"Annuity: {an.name} ({persons[an.owner].name})",
             f"value {an.balance:,.0f}; basis {an.basis:,.0f}; "
             f"grow {an.accumulation_return * 100:.2f}%; annuitize at {an.annuitize_at_age} "
-            f"over {an.payout_years} yrs (period-certain)",
+            f"over {an.payout_years} yrs (period-certain)"
+            + ("; bequest -> charity" if an.beneficiary.value == "charity" else ""),
             "assumed", "User input"))
     for h in plan.private_holdings:
         sale = (f"; sell at {h.sale_age}" if h.sale_age is not None
@@ -167,7 +174,8 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
         user_inputs.append((
             f"Private holding: {h.name} ({persons[h.owner].name})",
             f"value {h.value:,.0f}; basis {h.basis:,.0f}; "
-            f"grow {h.growth_rate * 100:.2f}%{dist}{sale}",
+            f"grow {h.growth_rate * 100:.2f}%{dist}{sale}"
+            + ("; bequest -> charity" if h.beneficiary.value == "charity" else ""),
             "assumed", "User input"))
     for re_ in plan.real_estate:
         sale = (f"; sell at {re_.sale_age}" if re_.sale_age is not None
@@ -180,7 +188,8 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
             f"Real estate: {re_.name} ({persons[re_.owner].name})",
             f"value {re_.value:,.0f}; basis {re_.basis:,.0f}; "
             f"appreciate {re_.appreciation * 100:.2f}%"
-            f"{'; primary (§121)' if re_.is_primary else '; investment'}{link}{sale}{nw}",
+            f"{'; primary (§121)' if re_.is_primary else '; investment'}{link}{sale}{nw}"
+            + ("; bequest -> charity" if re_.beneficiary.value == "charity" else ""),
             "assumed", "User input"))
     for label, val, kind, src in user_inputs:
         ws.cell(row=r, column=1, value=label)
@@ -233,7 +242,7 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
                ["Filing", "Contributions", "Growth (net of drag)",
                 "Spend goal", "Debt pmts", "Home purchase", "Healthcare",
                 "ACA subsidy", "IRMAA", "SS gross", "Taxable SS", "Other income",
-                "RMD", "W/D cash", "W/D taxable", "W/D tax-def", "W/D Roth",
+                "RMD", "QCD", "W/D cash", "W/D taxable", "W/D tax-def", "W/D Roth",
                 "W/D HSA", "Roth conversion", "Realized gains", "Dividends",
                 "Interest", "AGI", "MAGI", "Deductions", "Taxable income",
                 "Federal tax", "of which LTCG tax", "NIIT", "State tax",
@@ -256,7 +265,7 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
                  y.spend_goal, y.debt_payments, y.home_purchase,
                  y.healthcare_cost,
                  y.aca_subsidy, y.irmaa_surcharge, y.ss_total, y.taxable_ss,
-                 y.other_income, y.rmd_total, wbt.get("cash", 0.0),
+                 y.other_income, y.rmd_total, y.qcd_amount, wbt.get("cash", 0.0),
                  wbt.get("taxable", 0.0), wbt.get("tax_deferred", 0.0),
                  wbt.get("roth", 0.0), hsa_wd, y.roth_conversion,
                  y.realized_gains, y.dividends, y.interest, y.agi, y.magi,

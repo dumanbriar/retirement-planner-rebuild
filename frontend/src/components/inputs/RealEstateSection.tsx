@@ -11,6 +11,7 @@ import {
 } from "../ui/fields";
 import { removeAt, type SectionProps, updateAt } from "./sectionProps";
 import { ModelingDisclosure } from "./ModelingDisclosure";
+import { BequestToggle } from "./BequestToggle";
 
 export function RealEstateSection({ input, onChange, errors, dense }: SectionProps) {
   const ownerOptions = input.persons.map((p, i) => ({ value: i, label: p.name || `Person ${i + 1}` }));
@@ -110,6 +111,10 @@ export function RealEstateSection({ input, onChange, errors, dense }: SectionPro
                   checked={r.include_in_net_worth}
                   onChange={(include_in_net_worth) => set(i, { include_in_net_worth })}
                   help="Uncheck to leave the home out of net worth and total assets (a common conservative choice for the roof over your head). Sale proceeds and the at-death legacy are still modeled."
+                />
+                <BequestToggle
+                  value={r.beneficiary}
+                  onChange={(beneficiary) => set(i, { beneficiary })}
                 />
                 <ModelingDisclosure assetKey="realestate" />
               </div>

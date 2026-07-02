@@ -11,6 +11,7 @@ import {
 } from "../ui/fields";
 import { removeAt, type SectionProps, updateAt } from "./sectionProps";
 import { ModelingDisclosure } from "./ModelingDisclosure";
+import { BequestToggle } from "./BequestToggle";
 
 const KIND_OPTIONS = (Object.keys(DISTRIBUTION_KIND_LABELS) as DistributionKind[]).map(
   (k) => ({ value: k, label: DISTRIBUTION_KIND_LABELS[k] }),
@@ -105,7 +106,13 @@ export function PrivateHoldingsSection({ input, onChange, errors, dense }: Secti
               />
             </div>
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-              <ModelingDisclosure assetKey="private" />
+              <div className="flex items-center gap-4">
+                <BequestToggle
+                  value={h.beneficiary}
+                  onChange={(beneficiary) => set(i, { beneficiary })}
+                />
+                <ModelingDisclosure assetKey="private" />
+              </div>
               <button
                 type="button"
                 onClick={() =>

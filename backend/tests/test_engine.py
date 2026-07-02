@@ -1090,6 +1090,136 @@ def test_real_estate_liability_link_validated():
                                        liability_index=3))  # no such liability
 
 
+# --------------------------------------------- charitable giving (Phase 7)
+def _rmd_age_giver(annual_qcd: float, td_balance=3_000_000) -> PlanInput:
+    """Rich (72, born 1954 -> RMD age 73) retires next year with a large IRA.
+    2026 is accumulation; RMDs and (retirement-modeled) QCDs start 2027."""
+    return PlanInput(
+        persons=[Person(name="Rich", current_age=72, retirement_age=73, death_age=90)],
+        accounts=[Account(name="IRA", type=AccountType.tax_deferred, owner=0,
+                          balance=td_balance, annual_contribution=0,
+                          expected_return=0.06),
+                  Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                          balance=100_000, cost_basis=100_000, annual_contribution=0,
+                          expected_return=0.05)],
+        annual_spending=60_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none,
+                                annual_qcd=annual_qcd))
+
+
+def test_qcd_constants():
+    assert C.QCD_ANNUAL_LIMIT == 111_000  # 2026, IRS Notice 2025-67
+    assert C.QCD_START_AGE == 71          # whole-year approximation of 70½
+
+
+def test_qcd_excluded_from_agi_and_counts_toward_rmd():
+    # 2027 RMD: IRA end-2026 = 3,000,000 * 1.06 = 3,180,000; /26.5 = 120,000.
+    # QCD = 20,000 * 1.025 = 20,500 -> taxable forced RMD 99,500. AGI must be
+    # exactly 20,500 lower than the no-QCD run (the exclusion, §408(d)(8)).
+    with_q = {y.year: y for y in Simulator(_rmd_age_giver(20_000),
+                                           strategy=ConversionStrategy.none).run()[0]}
+    no_q = {y.year: y for y in Simulator(_rmd_age_giver(0),
+                                         strategy=ConversionStrategy.none).run()[0]}
+    y27, base27 = with_q[2027], no_q[2027]
+    assert math.isclose(y27.rmd_total, 120_000, rel_tol=1e-9)      # gross RMD
+    assert math.isclose(y27.qcd_amount, 20_500, abs_tol=0.01)
+    assert math.isclose(base27.agi - y27.agi, 20_500, abs_tol=0.5)  # excluded
+    assert base27.total_tax > y27.total_tax                          # tax saved
+    # the taxable forced withdrawal is only the RMD excess over the QCD
+    assert math.isclose(y27.withdrawals_by_type["tax_deferred"],
+                        120_000 - 20_500, abs_tol=0.5)
+    # the QCD left the IRA on top of the taxable RMD (visible on the account)
+    ira = next(a for a in y27.accounts if a.name == "IRA")
+    assert math.isclose(ira.withdrawal, 120_000, abs_tol=0.5)
+
+
+def test_qcd_capped_at_statutory_limit():
+    # a 200k/yr intent is capped at the (indexed) per-person limit:
+    # 111,000 * 1.025 = 113,775 in 2027.
+    rows = Simulator(_rmd_age_giver(200_000), strategy=ConversionStrategy.none).run()[0]
+    y27 = next(y for y in rows if y.year == 2027)
+    assert math.isclose(y27.qcd_amount, 111_000 * 1.025, abs_tol=0.5)
+
+
+def test_qcd_waits_for_age_70_half():
+    # A 68-year-old giver: no QCD until the age-71 year (70½ approximation).
+    plan = PlanInput(
+        persons=[Person(name="Jo", current_age=68, retirement_age=69, death_age=90)],
+        accounts=[Account(name="IRA", type=AccountType.tax_deferred, owner=0,
+                          balance=1_500_000, annual_contribution=0,
+                          expected_return=0.05),
+                  Account(name="Cash", type=AccountType.cash, owner=0,
+                          balance=200_000, annual_contribution=0)],
+        annual_spending=50_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none,
+                                annual_qcd=15_000))
+    by = {y.year: y for y in
+          Simulator(plan, strategy=ConversionStrategy.none).run()[0]}
+    assert by[2027].qcd_amount == 0   # age 69
+    assert by[2028].qcd_amount == 0   # age 70 (70½ not yet modeled as reached)
+    assert by[2029].qcd_amount > 0    # age 71
+    assert math.isclose(by[2029].qcd_amount, 15_000 * 1.025 ** 3, abs_tol=0.5)
+
+
+def test_qcd_wealth_conservation():
+    # QCD dollars leave the portfolio to charity: per-year wealth conservation
+    # must hold with the QCD as an explicit outflow.
+    rows, m = Simulator(_rmd_age_giver(30_000), strategy=ConversionStrategy.none).run()
+    assert not m.depleted
+    for y in rows:
+        if y.phase != "retirement":
+            continue
+        start = sum(a.start_balance for a in y.accounts)
+        growth = sum(a.growth for a in y.accounts)
+        end = sum(a.end_balance for a in y.accounts)
+        outflow = (y.spend_goal + y.healthcare_cost + y.total_tax
+                   + y.debt_payments + y.home_purchase + y.qcd_amount)
+        inflow = y.ss_total + y.other_income
+        assert math.isclose(end, start + growth - outflow + inflow,
+                            rel_tol=0.01, abs_tol=1500), f"{y.year}"
+
+
+def test_charitable_bequest_settles_tax_free_and_is_estate_deductible():
+    # An IRA left to charity: no heir income tax on the IRD (a charity pays
+    # none), the value lands in to_charity, and it is flagged estate-deductible
+    # (IRC §2055). The heirs' side is unchanged by the designation.
+    plan = PlanInput(
+        persons=[Person(name="Pat", current_age=60, retirement_age=62, death_age=85,
+                        ss_monthly_at_fra=2500, ss_claim_age=67)],
+        accounts=[Account(name="IRA", type=AccountType.tax_deferred, owner=0,
+                          balance=800_000, annual_contribution=0,
+                          expected_return=0.05, beneficiary="charity"),
+                  Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                          balance=600_000, cost_basis=600_000, annual_contribution=0,
+                          expected_return=0.05)],
+        annual_spending=50_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none))
+    result = build_plan(plan)
+    lg = result.legacy
+    ira = next(a for a in lg.assets if a.name == "IRA")
+    brok = next(a for a in lg.assets if a.name == "Brokerage")
+    assert ira.beneficiary == "charity"
+    assert ira.tax == 0 and ira.estate_deductible
+    assert not brok.estate_deductible
+    assert math.isclose(lg.to_charity, ira.gross, abs_tol=0.5)
+    assert lg.ird_tax == 0  # the only IRD asset went to charity
+    # heirs receive only the brokerage (step-up, no income tax)
+    assert math.isclose(lg.to_heirs_gross, brok.gross, abs_tol=0.5)
+    assert result.metrics.to_charity_real > 0
+
+
+def test_charitable_bequest_beats_heir_ird_on_tax():
+    # Classic ordering: bequeathing the IRA (IRD) to charity eliminates the
+    # heir income tax that the same bequest to heirs would trigger.
+    from app.models import Beneficiary
+    def ird_tax(beneficiary: Beneficiary) -> float:
+        plan = _rmd_age_giver(0)
+        plan.accounts[0].beneficiary = beneficiary
+        return build_plan(plan).legacy.ird_tax
+    assert ird_tax(Beneficiary.heirs) > 0
+    assert ird_tax(Beneficiary.charity) == 0
+
+
 # -------------------------------- surplus reinvestment conservation (regression)
 def test_no_phantom_surplus_from_rmds():
     # Regression: forced RMDs were double-counted as available resources in the
