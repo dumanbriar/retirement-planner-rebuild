@@ -32,8 +32,8 @@ const SERIES: { key: keyof Datum; label: string; color: string; help: string }[]
     help: "Withdrawals from high-yield savings or money market. Used first in the waterfall to avoid unnecessary taxes." },
   { key: "other", label: "Other income", color: "#a78bfa",
     help: "Pensions, part-time income, rental income, and other user-defined income streams." },
-  { key: "annuity", label: "Annuity income", color: "#c084fc",
-    help: "Payouts from deferred annuities once annuitized. The basis portion is a tax-free return of capital; the gain portion is ordinary income (exclusion ratio)." },
+  { key: "annuity", label: "Annuity / K-1 income", color: "#c084fc",
+    help: "Payouts from deferred annuities once annuitized (basis tax-free, gain ordinary via the exclusion ratio) plus cash distributions from private holdings (K-1 / dividends)." },
 ];
 
 interface Datum {

@@ -125,6 +125,31 @@ export interface Annuity {
   purchase_amount: number;
 }
 
+/** How a private holding's K-1 cash distribution is taxed each year. */
+export type DistributionKind = "ordinary" | "qualified";
+
+export const DISTRIBUTION_KIND_LABELS: Record<DistributionKind, string> = {
+  ordinary: "Ordinary income (pass-through K-1)",
+  qualified: "Qualified dividends (C-corp)",
+};
+
+/**
+ * Private company shares / partnership interest (illiquid). Amounts are
+ * nominal. Never enters the withdrawal waterfall; counts in net worth.
+ */
+export interface PrivateHolding {
+  name: string;
+  owner: number;
+  value: number; // current fair market value, nominal
+  basis: number; // cost basis (for the sale LTCG)
+  growth_rate: number; // assumed growth
+  /** Level annual cash distribution (nominal $/yr) paid out of the growth. */
+  annual_distribution: number;
+  distribution_kind: DistributionKind;
+  /** Optional liquidity event: sell the entire holding at this age (null => hold to death). */
+  sale_age: number | null;
+}
+
 /** How an asset is taxed when it passes to its beneficiary at death. */
 export type TransferCharacter = "tax_free" | "step_up" | "ird";
 
@@ -187,6 +212,7 @@ export interface PlanInput {
   income_streams: IncomeStream[];
   insurance_policies: InsurancePolicy[];
   annuities: Annuity[];
+  private_holdings: PrivateHolding[];
   annual_spending: number; // retirement spend goal, today's $
   assumptions: Assumptions;
 }

@@ -16,8 +16,9 @@ from app.engine.taxes import (TaxYearInput, aca_applicable_pct, aca_subsidy,
                               taxable_social_security)
 from app.engine.planner import SPLIT_LEVELS, apply_split
 from app.models import (Account, AccountType, AccountVehicle, Annuity,
-                        Assumptions, ConversionStrategy, IncomeStream,
-                        InsurancePolicy, Liability, Person, PlanInput)
+                        Assumptions, ConversionStrategy, DistributionKind,
+                        IncomeStream, InsurancePolicy, Liability, Person,
+                        PlanInput, PrivateHolding)
 
 
 # ----------------------------------------------------------- federal tax
@@ -174,11 +175,13 @@ def test_full_plan_runs_and_is_consistent():
     assert rows[0].year == C.BASE_YEAR
     # both retire in 2036 (Sam 65, Alex 63)
     assert metrics.retirement_year == 2036
-    # accounting identity per account-year
+    # accounting identity per account-year (generalized: distributions are
+    # balance outflows for annuities/private holdings; 0 for ordinary accounts)
     for y in rows:
         for ac in y.accounts:
             recon = (ac.start_balance + ac.contribution - ac.withdrawal
-                     - ac.conversion_out + ac.conversion_in + ac.growth)
+                     - ac.distribution - ac.conversion_out + ac.conversion_in
+                     + ac.growth)
             assert math.isclose(recon, ac.end_balance, abs_tol=0.5), \
                 f"{y.year} {ac.name}: {recon} != {ac.end_balance}"
     # taxable basis never exceeds balance (within rounding) or goes negative
@@ -748,6 +751,154 @@ def test_insurance_surrender_realizes_ordinary_gain():
     assert not sim.policies[0].active
     # the full cash value lands in the portfolio
     assert math.isclose(sim.surplus_account().balance - before, 180_000, abs_tol=1)
+# --------------------------------------------- private holdings (Phase 5)
+def _solo_with_holding(holding: PrivateHolding, **kw) -> PlanInput:
+    return PlanInput(
+        persons=[Person(name="Pat", current_age=60, retirement_age=62, death_age=85,
+                        ss_monthly_at_fra=2500, ss_claim_age=67)],
+        accounts=[
+            Account(name="401k", type=AccountType.tax_deferred, owner=0,
+                    balance=1_000_000, annual_contribution=0, expected_return=0.05),
+            Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                    balance=200_000, cost_basis=200_000, annual_contribution=0,
+                    expected_return=0.05),
+        ],
+        private_holdings=[holding],
+        annual_spending=60_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none),
+        **kw)
+
+
+def test_private_growth_and_distribution_hand_check():
+    # value 500k @ 4%: growth 20,000; K-1 pays 20,000 out of it -> end 500,000.
+    h = PrivateHolding(name="S-corp", owner=0, value=500_000, basis=200_000,
+                       growth_rate=0.04, annual_distribution=20_000,
+                       distribution_kind=DistributionKind.ordinary)
+    rows = Simulator(_solo_with_holding(h), strategy=ConversionStrategy.none).run()[0]
+    pr = next(a for a in rows[0].accounts if a.asset_class == "private")
+    assert math.isclose(pr.start_balance, 500_000, abs_tol=0.01)
+    assert math.isclose(pr.growth, 20_000, abs_tol=0.01)
+    assert math.isclose(pr.distribution, 20_000, abs_tol=0.01)
+    assert math.isclose(pr.end_balance, 500_000, abs_tol=0.01)
+    # identity: start + contribution - withdrawal - distribution + growth = end
+    recon = pr.start_balance + pr.contribution - pr.withdrawal \
+        - pr.distribution + pr.growth
+    assert math.isclose(recon, pr.end_balance, abs_tol=0.01)
+    assert pr.transfer_character == "step_up"
+
+
+def test_private_liquidity_event_realizes_ltcg():
+    # No distributions; sale at 65 (2031). Value = 500k * 1.04^5 = 608,326.45
+    # at the start of the sale year; LTCG = value - basis = 408,326.45.
+    h = PrivateHolding(name="Startup", owner=0, value=500_000, basis=200_000,
+                       growth_rate=0.04, annual_distribution=0, sale_age=65)
+    rows = Simulator(_solo_with_holding(h), strategy=ConversionStrategy.none).run()[0]
+    by = {y.year: y for y in rows}
+    sale_value = 500_000 * 1.04 ** 5
+    y31 = by[2031]
+    pr = next(a for a in y31.accounts if a.asset_class == "private")
+    assert math.isclose(pr.withdrawal, sale_value, rel_tol=1e-9)   # full proceeds
+    assert pr.end_balance == 0
+    assert math.isclose(y31.realized_gains, sale_value - 200_000, rel_tol=1e-6)
+    assert y31.ltcg_tax > 0  # taxed through the 0/15/20% stack in retirement
+    # gone the following year, and the proceeds joined the portfolio accounts
+    assert not any(a.asset_class == "private" for a in by[2032].accounts)
+    base = _solo_with_holding(PrivateHolding(name="none", owner=0, value=0))
+    base_rows = Simulator(base, strategy=ConversionStrategy.none).run()[0]
+    base31 = next(y for y in base_rows if y.year == 2031)
+    acct_bump = (sum(a.end_balance for a in y31.accounts if a.asset_class == "account")
+                 - sum(a.end_balance for a in base31.accounts if a.asset_class == "account"))
+    assert acct_bump > 500_000  # proceeds (net of the LTCG tax) are in the portfolio
+
+
+def test_private_step_up_at_death():
+    # Held to death: passes with a basis step-up, no income tax (IRC §1014).
+    # Pat dies at 85 (2051): 26 growth years 2026..2051 -> 500k * 1.04^26.
+    h = PrivateHolding(name="Family LLC", owner=0, value=500_000, basis=100_000,
+                       growth_rate=0.04)
+    result = build_plan(_solo_with_holding(h))
+    pr = next(a for a in result.legacy.assets if a.asset_class == "private")
+    assert math.isclose(pr.gross, 500_000 * 1.04 ** 26, rel_tol=1e-9)
+    assert pr.tax == 0
+    assert pr.transfer_character == "step_up"
+
+
+def test_private_spousal_transfer_steps_up_basis():
+    # Sam (owner 0) dies at 92 (2063); Alex inherits the shares in 2064 with the
+    # basis stepped up to the date-of-death value (IRC §1014).
+    h = PrivateHolding(name="Shares", owner=0, value=300_000, basis=50_000,
+                       growth_rate=0.03)
+    rows = Simulator(couple_plan(private_holdings=[h]),
+                     strategy=ConversionStrategy.none).run()[0]
+    by = {y.year: y for y in rows}
+    pr64 = next(a for a in by[2064].accounts if a.asset_class == "private")
+    assert pr64.owner == 1
+    # stepped-up basis == value at transfer == this year's starting value
+    assert math.isclose(pr64.cost_basis, pr64.start_balance, abs_tol=0.5)
+    assert math.isclose(pr64.start_balance, 300_000 * 1.03 ** 38, rel_tol=1e-9)
+
+
+def test_private_accumulation_distribution_taxed_flat():
+    # Before retirement the K-1 reinvests net of tax: ordinary at the 22% flat
+    # rate (10,000 * 0.22 = 2,200), qualified at the 15% dividend rate (1,500).
+    def plan_with(kind):
+        return PlanInput(
+            persons=[Person(name="Jo", current_age=50, retirement_age=65, death_age=90)],
+            accounts=[Account(name="401k", type=AccountType.tax_deferred, owner=0,
+                              balance=500_000, annual_contribution=0,
+                              expected_return=0.05)],
+            private_holdings=[PrivateHolding(
+                name="K-1", owner=0, value=250_000, basis=250_000, growth_rate=0.05,
+                annual_distribution=10_000, distribution_kind=kind)],
+            annual_spending=50_000,
+            assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none))
+    for kind, expected_tax in ((DistributionKind.ordinary, 2_200.0),
+                               (DistributionKind.qualified, 1_500.0)):
+        rows = Simulator(plan_with(kind), strategy=ConversionStrategy.none).run()[0]
+        y0 = rows[0]
+        assert y0.phase == "accumulation"
+        assert math.isclose(y0.total_tax, expected_tax, abs_tol=0.01), kind
+        assert math.isclose(y0.legacy_distributions, 10_000, abs_tol=0.01)
+        # the net distribution was reinvested into the portfolio
+        assert math.isclose(y0.surplus_reinvested, 10_000 - expected_tax, abs_tol=0.01)
+
+
+def test_private_qualified_k1_taxed_at_preferential_rates():
+    # Same cash, different character: an ordinary K-1 must cost more federal tax
+    # in retirement than a qualified one (which stacks at 0/15/20%).
+    def with_kind(kind):
+        h = PrivateHolding(name="K-1", owner=0, value=400_000, basis=400_000,
+                           growth_rate=0.05, annual_distribution=25_000,
+                           distribution_kind=kind)
+        rows = Simulator(_solo_with_holding(h), strategy=ConversionStrategy.none).run()[0]
+        return next(y for y in rows if y.phase == "retirement" and y.ages[0] == 70)
+    ord_y = with_kind(DistributionKind.ordinary)
+    qual_y = with_kind(DistributionKind.qualified)
+    # both include the 25k in taxable income, but the qualified one pays less
+    # (at this income much of it lands in the 0% LTCG bracket)
+    assert ord_y.federal_tax > qual_y.federal_tax + 1_000
+
+
+def test_private_holding_identity_and_full_plan():
+    # Full-pipeline sanity with a distribution-paying holding: the accounting
+    # identity holds every year and the workbook still builds.
+    h = PrivateHolding(name="S-corp", owner=0, value=350_000, basis=150_000,
+                       growth_rate=0.05, annual_distribution=12_000,
+                       distribution_kind=DistributionKind.qualified)
+    plan = couple_plan(private_holdings=[h])
+    rows, m = Simulator(plan, strategy=ConversionStrategy.fill_12).run()
+    for y in rows:
+        for ac in y.accounts:
+            recon = (ac.start_balance + ac.contribution - ac.withdrawal
+                     - ac.distribution - ac.conversion_out + ac.conversion_in
+                     + ac.growth)
+            assert math.isclose(recon, ac.end_balance, abs_tol=0.5), \
+                f"{y.year} {ac.name}"
+    from app.engine.excel import build_workbook
+    result = build_plan(plan)
+    assert build_workbook(plan, result)[:2] == b"PK"
+
+
 # -------------------------------- surplus reinvestment conservation (regression)
 def test_no_phantom_surplus_from_rmds():
     # Regression: forced RMDs were double-counted as available resources in the

@@ -1,6 +1,7 @@
 import { useState, type ComponentType, type ReactNode } from "react";
 import {
   Banknote,
+  Briefcase,
   ChevronDown,
   ChevronRight,
   ChevronsLeft,
@@ -27,6 +28,7 @@ import { LiabilitiesSection } from "./LiabilitiesSection";
 import { IncomeStreamsSection } from "./IncomeStreamsSection";
 import { InsuranceSection } from "./InsuranceSection";
 import { AnnuitiesSection } from "./AnnuitiesSection";
+import { PrivateHoldingsSection } from "./PrivateHoldingsSection";
 import { SpendingSection } from "./SpendingSection";
 import { AssumptionsSection } from "./AssumptionsSection";
 import { PlanIO } from "./PlanIO";
@@ -220,6 +222,19 @@ export function Sidebar({
           }
         >
           <AnnuitiesSection {...sectionProps} />
+        </SectionAccordion>
+
+        <SectionAccordion
+          icon={Briefcase}
+          title="Private holdings"
+          hasError={hasErr("private_holdings.")}
+          summary={
+            input.private_holdings.length === 0
+              ? "None"
+              : input.private_holdings.map((h) => `${h.name} ${fmtCurrency(h.value)}`).join(" · ")
+          }
+        >
+          <PrivateHoldingsSection {...sectionProps} />
         </SectionAccordion>
 
         <SectionAccordion

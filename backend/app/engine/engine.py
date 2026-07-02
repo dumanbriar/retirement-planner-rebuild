@@ -28,8 +28,9 @@ from __future__ import annotations
 from typing import Optional
 
 from ..models import (Account, AccountType, AccountVehicle, AccountYear,
-                      Annuity, Beneficiary, ConversionStrategy, InsurancePolicy,
-                      LegacyAssetResult, LegacyResult, Metrics, PlanInput,
+                      Annuity, Beneficiary, ConversionStrategy,
+                      DistributionKind, InsurancePolicy, LegacyAssetResult,
+                      LegacyResult, Metrics, PlanInput, PrivateHolding,
                       TransferCharacter, YearRow)
 from . import constants as C
 from . import socialsecurity as ss
@@ -125,6 +126,29 @@ class SimAnnuity:
         return self.spec.accumulation_return
 
 
+class SimPrivate:
+    """Internal state for a private holding (company shares / partnership
+    interest). Illiquid: never in the withdrawal waterfall; its value counts
+    in net worth. Grows at the assumed rate, optionally pays a level annual
+    K-1 cash distribution out of that growth, and can be sold in a one-time
+    liquidity event (LTCG on the gain over basis)."""
+    def __init__(self, spec: PrivateHolding):
+        self.spec = spec
+        self.owner = spec.owner
+        self.value = spec.value
+        self.basis = spec.basis
+        self.active = True
+        # per-year reporting scratch
+        self.start_balance = self.value
+        self.growth = 0.0
+        self.distribution = 0.0
+        self.sale_proceeds = 0.0
+
+    @property
+    def rate(self) -> float:
+        return self.spec.growth_rate
+
+
 class YearScratch:
     def __init__(self):
         self.withdrawals_by_type: dict[str, float] = {}
@@ -162,6 +186,7 @@ class Simulator:
 
         self.policies = [SimInsurance(p) for p in plan.insurance_policies]
         self.annuities = [SimAnnuity(a) for a in plan.annuities]
+        self.holdings = [SimPrivate(h) for h in plan.private_holdings]
         # per-year insurance/annuity scratch (set each year before the phase step)
         self._ins_premium = 0.0
         self._ins_surrender_gain = 0.0
@@ -169,6 +194,10 @@ class Simulator:
         self._annuity_payout = 0.0       # total annuity payments this year (cash)
         self._annuity_taxable = 0.0      # ordinary (gain) portion of those payments
         self._annuity_purchase = 0.0     # lump sum to fund a planned annuity buy
+        self._priv_distribution = 0.0    # K-1 cash distributions this year
+        self._priv_dist_ordinary = 0.0   # ...taxed as ordinary income
+        self._priv_dist_qualified = 0.0  # ...taxed as qualified dividends
+        self._priv_sale_gain = 0.0       # LTCG realized by a liquidity event
 
         self.accounts = [SimAccount(s) for s in plan.accounts]
         if not any(x.spec.type in (AccountType.taxable, AccountType.cash)
@@ -433,6 +462,12 @@ class Simulator:
                         for an in self.annuities:
                             if an.owner == i:
                                 an.owner = 1 - i
+                        # private shares: a surviving spouse inherits with a
+                        # basis step-up to the date-of-death value (IRC §1014).
+                        for h in self.holdings:
+                            if h.active and h.owner == i:
+                                h.owner = 1 - i
+                                h.basis = h.value
                         # life insurance: the death benefit is paid (income-tax-
                         # free, IRC §101) into the surviving spouse's portfolio.
                         for p in self.policies:
@@ -458,6 +493,7 @@ class Simulator:
             self.update_ss_levels(year)
             self.prepare_insurance(year)
             self.prepare_annuities(year)
+            self.prepare_private(year)
             dividends, interest = self.start_of_year_income()
 
             # a future home purchase activates here: the mortgage appears and a
@@ -508,6 +544,25 @@ class Simulator:
                 tgt.contribution += net
                 if tgt.spec.type == AccountType.taxable:
                     tgt.basis += net
+
+            # K-1 distributions before retirement reinvest net of tax: ordinary
+            # at the flat pre-retirement rate, qualified at the 15% dividend rate.
+            if not retired and self._priv_distribution > 0:
+                t = (self._priv_dist_ordinary * self.a.pre_retirement_tax_rate
+                     + self._priv_dist_qualified * ACCUM_DIVIDEND_TAX_RATE)
+                row.total_tax += t
+                row.legacy_distributions += self._priv_distribution
+                self._reinvest(self._priv_distribution - t, row)
+
+            # a liquidity event during accumulation: the LTCG is taxed at the
+            # flat 15% rate (the documented accumulation-phase capital-gain
+            # assumption), paid from the portfolio. Retirement sales instead
+            # flow through compute_taxes with full 0/15/20% stacking + NIIT.
+            if not retired and self._priv_sale_gain > 0:
+                t = self._priv_sale_gain * ACCUM_DIVIDEND_TAX_RATE
+                row.total_tax += t
+                tgt = self.surplus_account()
+                tgt.balance -= t
 
             if not retired:
                 # annual drag, paid from the accounts (shown net in growth)
@@ -569,14 +624,26 @@ class Simulator:
                 transfer_character=TransferCharacter.ird.value,
                 beneficiary=Beneficiary.heirs.value,
             ) for a in self.annuities if a.active or a.payout > 0]
+            # private holdings (value, basis, this year's K-1 / sale flows)
+            row.accounts += [AccountYear(
+                name=h.spec.name, type=None, owner=h.owner,
+                start_balance=h.start_balance, contribution=0.0,
+                withdrawal=h.sale_proceeds, distribution=h.distribution,
+                growth=h.growth, end_balance=h.value, cost_basis=h.basis,
+                asset_class="private",
+                transfer_character=TransferCharacter.step_up.value,
+                beneficiary=Beneficiary.heirs.value,
+            ) for h in self.holdings if h.active or h.sale_proceeds > 0]
             row.premiums_paid = self._ins_premium if retired else 0.0
             row.legacy_purchases = self._annuity_purchase
             row.death_benefits_paid = self._death_benefit_paid_year
             if retired:
-                row.legacy_distributions += self._annuity_payout
+                row.legacy_distributions += self._annuity_payout \
+                    + self._priv_distribution
             row.total_assets = (sum(x.balance for x in self.accounts)
                                 + sum(p.cash_value for p in self.policies if p.active)
-                                + sum(a.balance for a in self.annuities if a.active))
+                                + sum(a.balance for a in self.annuities if a.active)
+                                + sum(h.value for h in self.holdings if h.active))
             row.total_liabilities = sum(l["balance"] for l in self.liabilities
                                         if self._liab_active(l, year))
             row.net_worth = row.total_assets - row.total_liabilities
@@ -778,6 +845,52 @@ class Simulator:
                     a.balance = 0.0
                     a.basis = 0.0
                     a.active = False
+
+    def prepare_private(self, year: int) -> None:
+        """Process private holdings for the year, BEFORE the phase step so the
+        results are stable across the tax fixed point. The value grows at the
+        assumed rate; a level K-1 cash distribution is paid out of that growth
+        (taxed in full as ordinary income or qualified dividends per the
+        holding's distribution_kind). A liquidity event at sale_age sells the
+        entire holding at its current value into the portfolio; the gain over
+        cost basis is a long-term capital gain (IRC §1(h)). Sets per-year
+        scratch: _priv_distribution (cash, split into _priv_dist_ordinary /
+        _priv_dist_qualified) and _priv_sale_gain (LTCG)."""
+        self._priv_distribution = 0.0
+        self._priv_dist_ordinary = 0.0
+        self._priv_dist_qualified = 0.0
+        self._priv_sale_gain = 0.0
+        for h in self.holdings:
+            h.start_balance = h.value
+            h.growth = 0.0
+            h.distribution = 0.0
+            h.sale_proceeds = 0.0
+            if not h.active or not self.alive(h.owner, year):
+                continue
+            age = self.age(h.owner, year)
+            # liquidity event: sell everything at the current value; proceeds
+            # join the portfolio (after-tax — the LTCG is taxed separately).
+            if h.spec.sale_age is not None and age >= h.spec.sale_age:
+                self._priv_sale_gain += max(0.0, h.value - h.basis)
+                h.sale_proceeds = h.value
+                tgt = self.surplus_account()
+                tgt.balance += h.value
+                tgt.contribution += h.value
+                if tgt.spec.type == AccountType.taxable:
+                    tgt.basis += h.value
+                h.value = 0.0
+                h.active = False
+                continue
+            # grow, then pay the K-1 distribution out of the (grown) value
+            h.growth = h.value * h.rate
+            d = min(h.spec.annual_distribution, h.value + h.growth)
+            h.value = h.value + h.growth - d
+            h.distribution = d
+            self._priv_distribution += d
+            if h.spec.distribution_kind == DistributionKind.qualified:
+                self._priv_dist_qualified += d
+            else:
+                self._priv_dist_ordinary += d
 
     # -------------------------------------------------------- accumulation yr
     def accumulation_year_step(self, year: int, status: str,
@@ -1101,7 +1214,7 @@ class Simulator:
                     + tax_guess + self.annual_gifts(year) + self._ins_premium
                     + self._annuity_purchase)
             resources = (ss_total + other_taxable + other_nontaxable + rmd_total
-                         + self._annuity_payout)
+                         + self._annuity_payout + self._priv_distribution)
             gap = need + scratch.penalties - resources
             if gap > 0:
                 got = self.waterfall_withdraw(gap, scratch, year)
@@ -1113,13 +1226,16 @@ class Simulator:
             td_withdrawn = scratch.withdrawals_by_type.get("tax_deferred", 0.0)
             ordinary = (td_withdrawn + scratch.roth_conversion
                         + scratch.hsa_nonmedical + other_taxable + interest
-                        + self._ins_surrender_gain + self._annuity_taxable)
+                        + self._ins_surrender_gain + self._annuity_taxable
+                        + self._priv_dist_ordinary)
             tax_res = compute_taxes(TaxYearInput(
                 year=year, filing_status=status, inflation=a.inflation,
                 ordinary_income=ordinary, ss_benefits=ss_total,
-                qualified_dividends=dividends, realized_ltcg=scratch.realized_gains,
+                qualified_dividends=dividends + self._priv_dist_qualified,
+                realized_ltcg=scratch.realized_gains + self._priv_sale_gain,
                 interest=interest, ages_65_plus=ages65, state_rate=a.state_tax_rate))
-            pref = min(dividends + max(0.0, scratch.realized_gains),
+            pref = min(dividends + self._priv_dist_qualified
+                       + max(0.0, scratch.realized_gains + self._priv_sale_gain),
                        tax_res.taxable_income)
             last_ord_taxable = tax_res.taxable_income - pref
             last_conversion = scratch.roth_conversion
@@ -1146,7 +1262,7 @@ class Simulator:
                 + tax_guess + scratch.penalties + self.annual_gifts(year)
                 + self._ins_premium + self._annuity_purchase)
         resources = (ss_total + other_taxable + other_nontaxable
-                     + self._annuity_payout
+                     + self._annuity_payout + self._priv_distribution
                      + sum(scratch.withdrawals_by_type.values()))
         surplus = max(0.0, resources - need - scratch.shortfall)
         if surplus > 0.005 and scratch.shortfall <= 1:
@@ -1180,7 +1296,7 @@ class Simulator:
             withdrawals_by_type=report_wd,
             roth_conversion=scratch.roth_conversion,
             surplus_reinvested=surplus, shortfall=scratch.shortfall,
-            realized_gains=scratch.realized_gains,
+            realized_gains=scratch.realized_gains + self._priv_sale_gain,
             taxable_ss=tax_res.taxable_ss, agi=tax_res.agi, magi=tax_res.magi,
             deductions=tax_res.deductions, taxable_income=tax_res.taxable_income,
             federal_tax=tax_res.federal_tax, ltcg_tax=tax_res.ltcg_tax,

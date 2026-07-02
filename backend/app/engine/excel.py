@@ -159,6 +159,16 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
             f"grow {an.accumulation_return * 100:.2f}%; annuitize at {an.annuitize_at_age} "
             f"over {an.payout_years} yrs (period-certain)",
             "assumed", "User input"))
+    for h in plan.private_holdings:
+        sale = (f"; sell at {h.sale_age}" if h.sale_age is not None
+                else "; held to death (basis step-up)")
+        dist = (f"; K-1 {h.annual_distribution:,.0f}/yr ({h.distribution_kind.value})"
+                if h.annual_distribution else "")
+        user_inputs.append((
+            f"Private holding: {h.name} ({persons[h.owner].name})",
+            f"value {h.value:,.0f}; basis {h.basis:,.0f}; "
+            f"grow {h.growth_rate * 100:.2f}%{dist}{sale}",
+            "assumed", "User input"))
     for label, val, kind, src in user_inputs:
         ws.cell(row=r, column=1, value=label)
         ws.cell(row=r, column=2, value=val)
@@ -257,13 +267,16 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
     # ------------------------------------------------------ Account Detail
     ws = wb.create_sheet("Account Detail")
     ws["A1"] = "Every account, every year: start + contributions - withdrawals " \
-               "± conversions + growth = end"
+               "- distributions ± conversions + growth = end"
     ws["A1"].font = TITLE_FONT
     _sheet_header(ws, 3, ["Year", "Phase", "Account", "Type", "Owner",
                           "Start balance", "Contribution*", "Withdrawal",
-                          "Conversion out", "Conversion in", "Growth", "End balance",
-                          "Cost basis (taxable)"])
-    ws["A2"] = "*Contribution includes reinvested surplus income in retirement years."
+                          "Distribution", "Conversion out", "Conversion in",
+                          "Growth", "End balance", "Cost basis",
+                          "Premium (cost, not from balance)"])
+    ws["A2"] = "*Contribution includes reinvested surplus income in retirement years. " \
+               "Distribution = annuity payout / K-1 cash paid out of the asset. Premium " \
+               "is an insurance cost funded from the portfolio, not from the cash value."
     ws["A2"].font = SUB_FONT
     r = 4
     for y in result.years:
@@ -272,8 +285,8 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
                     ac.type.value if ac.type else ac.asset_class,
                     persons[ac.owner].name if ac.owner < len(persons) else "",
                     ac.start_balance, ac.contribution, ac.withdrawal,
-                    ac.conversion_out, ac.conversion_in, ac.growth,
-                    ac.end_balance, ac.cost_basis]
+                    ac.distribution, ac.conversion_out, ac.conversion_in,
+                    ac.growth, ac.end_balance, ac.cost_basis, ac.premium]
             for c, v in enumerate(vals, 1):
                 cell = ws.cell(row=r, column=c, value=v)
                 if c >= 6 and isinstance(v, float):

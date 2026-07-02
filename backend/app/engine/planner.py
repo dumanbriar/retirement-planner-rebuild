@@ -435,6 +435,23 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
                       "and starts the contract with a full after-tax basis. NOT modeled: "
                       "variable/indexed subaccounts, GLWB/income riders, lifetime "
                       "(mortality-based) annuitization."})
+    if plan.private_holdings:
+        notes.append({
+            "label": "Private company shares", "value": "illiquid; LTCG at sale; step-up at death",
+            "kind": "modeled",
+            "source": "The holding grows at the user-assumed rate and never enters the "
+                      "withdrawal waterfall (illiquid). An optional level K-1 cash "
+                      "distribution (nominal $/yr) is paid out of the growth and taxed in "
+                      "full each year — as ordinary income or as qualified dividends, as "
+                      "selected. An optional liquidity event sells the entire holding at "
+                      "the owner's chosen age: the gain over cost basis is a long-term "
+                      "capital gain (IRC §1(h), with 0/15/20% stacking and NIIT §1411 in "
+                      "retirement; a flat 15% before household retirement, like the "
+                      "dividend drag). Held to death, the shares pass with a stepped-up "
+                      "basis and no income tax to heirs (IRC §1014); a surviving spouse "
+                      "inherits with the same step-up. NOT modeled: pass-through basis "
+                      "adjustments (the K-1 is taxed as the cash received), QSBS §1202 "
+                      "exclusion, valuation discounts, installment sales (§453)."})
     if any(getattr(s, "survivor_pct", 0) > 0 for s in plan.income_streams):
         notes.append({
             "label": "Pension/annuity survivor benefit", "value": "continues at set %",

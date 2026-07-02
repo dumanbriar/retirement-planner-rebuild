@@ -167,6 +167,33 @@ class Annuity(BaseModel):
     purchase_amount: float = Field(default=0, ge=0)
 
 
+class DistributionKind(str, Enum):
+    """How a private holding's K-1 cash distribution is taxed each year."""
+    ordinary = "ordinary"    # pass-through business income
+    qualified = "qualified"  # qualified dividends (C-corp / covered payouts)
+
+
+class PrivateHolding(BaseModel):
+    """Private company shares / partnership interest (illiquid).
+
+    Amounts are nominal. The holding never enters the withdrawal waterfall;
+    its value counts in net worth. It grows at the assumed rate, may pay a
+    level annual K-1 cash distribution (taxed in full as `distribution_kind`),
+    and can be sold in a one-time liquidity event at `sale_age` — the gain
+    over cost basis is a long-term capital gain (IRC §1(h)). Held to death,
+    the shares pass to heirs with a stepped-up basis (IRC §1014)."""
+    name: str = "Private company shares"
+    owner: int = Field(default=0, ge=0, le=1)
+    value: float = Field(default=0, ge=0)        # current fair market value, nominal
+    basis: float = Field(default=0, ge=0)        # cost basis (for the sale LTCG)
+    growth_rate: float = Field(default=0.04, ge=-0.10, le=0.20)  # assumed
+    # Level annual cash distribution (nominal $/yr) paid out of the growth.
+    annual_distribution: float = Field(default=0, ge=0)
+    distribution_kind: DistributionKind = DistributionKind.ordinary
+    # Optional liquidity event: sell the entire holding at this age.
+    sale_age: Optional[int] = Field(default=None, ge=18, le=100)
+
+
 class ConversionStrategy(str, Enum):
     none = "none"
     fill_10 = "fill_10"
@@ -215,6 +242,7 @@ class PlanInput(BaseModel):
     income_streams: list[IncomeStream] = Field(default_factory=list, max_length=20)
     insurance_policies: list[InsurancePolicy] = Field(default_factory=list, max_length=20)
     annuities: list[Annuity] = Field(default_factory=list, max_length=20)
+    private_holdings: list[PrivateHolding] = Field(default_factory=list, max_length=20)
     annual_spending: float = Field(gt=0)  # retirement spend goal, today's $
     assumptions: Assumptions = Field(default_factory=Assumptions)
 
@@ -233,6 +261,9 @@ class PlanInput(BaseModel):
         for an in self.annuities:
             if an.owner >= n:
                 raise ValueError(f"Annuity '{an.name}' owner index out of range")
+        for h in self.private_holdings:
+            if h.owner >= n:
+                raise ValueError(f"Private holding '{h.name}' owner index out of range")
         return self
 
 

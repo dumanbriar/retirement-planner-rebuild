@@ -8,6 +8,7 @@ import { LiabilitiesSection } from "./LiabilitiesSection";
 import { IncomeStreamsSection } from "./IncomeStreamsSection";
 import { InsuranceSection } from "./InsuranceSection";
 import { AnnuitiesSection } from "./AnnuitiesSection";
+import { PrivateHoldingsSection } from "./PrivateHoldingsSection";
 import { SpendingSection } from "./SpendingSection";
 import { AssumptionsSection } from "./AssumptionsSection";
 import { PlanIO } from "./PlanIO";
@@ -95,6 +96,13 @@ export function PlanForm({
           help="Non-qualified deferred annuities: tax-deferred growth, then a level payout split by the exclusion ratio (basis tax-free, gain ordinary). At death the remaining gain is taxable to heirs (IRD)."
         >
           <AnnuitiesSection {...sectionProps} />
+        </Card>
+
+        <Card
+          title="Private holdings"
+          help="Private company shares or partnership interests. Illiquid — never sold to cover spending. Optional K-1 cash distributions are taxed each year; an optional liquidity event realizes the gain as LTCG; held to death the basis steps up (IRC §1014)."
+        >
+          <PrivateHoldingsSection {...sectionProps} />
         </Card>
 
         <Card

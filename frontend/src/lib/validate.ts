@@ -103,6 +103,19 @@ export function validatePlanInput(input: PlanInput): FieldErrors {
     if (a.owner >= input.persons.length) errors[k("owner")] = "Owner is out of range.";
   });
 
+  (input.private_holdings ?? []).forEach((h, i) => {
+    const k = (f: string) => `private_holdings.${i}.${f}`;
+    if (!h.name.trim()) errors[k("name")] = "Name is required.";
+    if (!(h.value >= 0)) errors[k("value")] = "Must be ≥ 0.";
+    if (!(h.basis >= 0)) errors[k("basis")] = "Must be ≥ 0.";
+    if (!inRange(h.growth_rate, -0.1, 0.2))
+      errors[k("growth_rate")] = "Growth must be −10% to 20%.";
+    if (!(h.annual_distribution >= 0)) errors[k("annual_distribution")] = "Must be ≥ 0.";
+    if (h.sale_age != null && !inRange(h.sale_age, 18, 100))
+      errors[k("sale_age")] = "Sale age must be 18–100.";
+    if (h.owner >= input.persons.length) errors[k("owner")] = "Owner is out of range.";
+  });
+
   if (!(input.annual_spending > 0))
     errors["annual_spending"] = "Annual retirement spending must be greater than 0.";
 

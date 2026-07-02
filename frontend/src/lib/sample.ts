@@ -7,6 +7,7 @@ import type {
   Liability,
   Person,
   PlanInput,
+  PrivateHolding,
 } from "./types";
 import { DEFAULT_RETURNS } from "./types";
 
@@ -115,6 +116,7 @@ export const SAMPLE_INPUT: PlanInput = {
   income_streams: [],
   insurance_policies: [],
   annuities: [],
+  private_holdings: [],
   annual_spending: 96_000,
   assumptions: {
     ...DEFAULT_ASSUMPTIONS,
@@ -184,6 +186,19 @@ export function newInsurancePolicy(): InsurancePolicy {
     death_benefit: 0,
     premiums_paid_to_date: 0,
     surrender_at_age: null,
+  };
+}
+
+export function newPrivateHolding(): PrivateHolding {
+  return {
+    name: "Private company shares",
+    owner: 0,
+    value: 0,
+    basis: 0,
+    growth_rate: 0.04,
+    annual_distribution: 0,
+    distribution_kind: "ordinary",
+    sale_age: null,
   };
 }
 
