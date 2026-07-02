@@ -27,7 +27,7 @@ const SERIES: { key: keyof Datum; label: string; color: string; help: string }[]
   { key: "roth_wd", label: "Roth withdrawals", color: "#0d9488",
     help: "Tax-free withdrawals from Roth IRA / Roth 401(k). Used last in the withdrawal waterfall to preserve tax-free growth." },
   { key: "hsa_wd", label: "HSA withdrawals", color: "#f59e0b",
-    help: "Tax-free HSA withdrawals for qualified medical expenses (Medicare Part B, out-of-pocket costs). Non-medical use is taxed." },
+    help: "Non-medical HSA withdrawals used to fund spending (taxable; 20% penalty before 65). Tax-free medical HSA draws are not stacked here — they reduce the healthcare portion of the spending-need line instead." },
   { key: "cash_wd", label: "Cash withdrawals", color: "#94a3b8",
     help: "Withdrawals from high-yield savings or money market. Used first in the waterfall to avoid unnecessary taxes." },
   { key: "other", label: "Other income", color: "#a78bfa",

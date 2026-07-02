@@ -751,3 +751,129 @@ def test_untagged_roth_defaults_to_ira_not_employer():
     assert not any("elective-deferral" in w for w in r.warnings)
     assert Account(name="x", type=AccountType.roth, owner=0, balance=0)\
         .limit_vehicle() == AccountVehicle.ira
+
+
+# ------------------------------------------- audit regression tests (2026-07)
+def _early_retiree_plan():
+    """Retires pre-59.5 funded solely from tax-deferred: every withdrawal
+    incurs the 10% early-withdrawal penalty."""
+    return PlanInput(
+        persons=[Person(name="Solo", current_age=50, retirement_age=54,
+                        death_age=90, ss_monthly_at_fra=2500, ss_claim_age=67,
+                        salary=150_000)],
+        accounts=[Account(name="401k", type=AccountType.tax_deferred, owner=0,
+                          balance=1_500_000, annual_contribution=20_000,
+                          expected_return=0.06)],
+        annual_spending=90_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none))
+
+
+def test_lifetime_taxes_do_not_double_count_penalties():
+    # Regression: metrics.lifetime_taxes added row.penalties on top of
+    # row.total_tax, but total_tax already includes penalties.
+    sim = Simulator(_early_retiree_plan(), strategy=ConversionStrategy.none)
+    rows, m = sim.run()
+    assert sum(r.penalties for r in rows) > 1_000  # scenario exercises penalties
+    assert math.isclose(m.lifetime_taxes, sum(r.total_tax for r in rows),
+                        rel_tol=1e-9)
+
+
+def test_penalties_are_funded_from_the_portfolio():
+    # Regression: 10%/20% penalties were recognized as tax but never withdrawn,
+    # so sources - needs did not foot in penalty years. The retirement
+    # cash-flow identity must hold: SS + other income + withdrawals
+    # = spending + debt + home + healthcare + total tax + surplus - shortfall.
+    sim = Simulator(_early_retiree_plan(), strategy=ConversionStrategy.none)
+    rows, _ = sim.run()
+    checked = 0
+    for r in rows:
+        if r.phase != "retirement":
+            continue
+        sources = r.ss_total + r.other_income + sum(r.withdrawals_by_type.values())
+        needs = (r.spend_goal + r.debt_payments + r.home_purchase
+                 + r.healthcare_cost + r.total_tax)
+        residual = sources - needs - r.surplus_reinvested + r.shortfall
+        assert abs(residual) < 2.0, f"{r.year}: residual {residual:,.0f}"
+        checked += 1
+    assert checked > 0
+
+
+def test_accumulation_home_raid_income_is_taxed():
+    # Regression: a down payment funded by selling appreciated taxable shares
+    # (and raiding tax-deferred) realized gains and ordinary income tax-free.
+    def plan(with_purchase: bool) -> PlanInput:
+        liabs = []
+        if with_purchase:
+            liabs = [Liability(name="Future home", balance=400_000,
+                               interest_rate=0.06, annual_payment=30_000,
+                               start_age=48, down_payment=250_000)]
+        return PlanInput(
+            persons=[Person(name="Buyer", current_age=45, retirement_age=65,
+                            death_age=90, salary=150_000)],
+            accounts=[
+                Account(name="401k", type=AccountType.tax_deferred, owner=0,
+                        balance=300_000, annual_contribution=10_000,
+                        expected_return=0.06),
+                Account(name="Brokerage", type=AccountType.taxable, owner=0,
+                        balance=300_000, cost_basis=100_000,
+                        expected_return=0.06),
+            ],
+            liabilities=liabs, annual_spending=70_000,
+            assumptions=Assumptions(
+                roth_conversion_strategy=ConversionStrategy.none))
+
+    rows, _ = Simulator(plan(True), strategy=ConversionStrategy.none).run()
+    base_rows, _ = Simulator(plan(False), strategy=ConversionStrategy.none).run()
+    purchase = next(r for r in rows if r.home_purchase > 0)
+    base = next(r for r in base_rows if r.year == purchase.year)
+    # gains realized by the raid are reported and taxed
+    assert purchase.realized_gains > 10_000
+    assert purchase.ltcg_tax > 0
+    assert purchase.total_tax > base.total_tax + 0.10 * purchase.realized_gains
+
+
+def test_irmaa_lookback_uses_modeled_wage_magi():
+    # Regression: accumulation years always stored the 1.5x-spending estimate
+    # in magi_history even when salaries produced a real wage MAGI.
+    plan = PlanInput(
+        persons=[Person(name="Earner", current_age=60, retirement_age=64,
+                        death_age=90, ss_monthly_at_fra=3000, ss_claim_age=67,
+                        salary=300_000)],
+        accounts=[Account(name="401k", type=AccountType.tax_deferred, owner=0,
+                          balance=1_000_000, annual_contribution=20_000,
+                          expected_return=0.05)],
+        annual_spending=80_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none))
+    sim = Simulator(plan, strategy=ConversionStrategy.none)
+    rows, _ = sim.run()
+    first_working = rows[0]
+    assert first_working.phase == "accumulation" and first_working.magi > 250_000
+    assert math.isclose(sim.magi_history[first_working.year],
+                        first_working.magi, rel_tol=1e-9)
+    # explicit user override still wins
+    plan2 = plan.model_copy(deep=True)
+    plan2.assumptions.pre_retirement_magi = 111_000
+    sim2 = Simulator(plan2, strategy=ConversionStrategy.none)
+    sim2.run()
+    assert math.isclose(sim2.magi_history[rows[0].year], 111_000, rel_tol=1e-9)
+
+
+def test_ss_trust_fund_cut_applies_only_from_2034():
+    # Regression: the "-23% in 2034" sensitivity scenario scaled the PIA, which
+    # also cut benefits received before 2034.
+    plan = PlanInput(
+        persons=[Person(name="Old", current_age=63, retirement_age=64,
+                        death_age=90, ss_monthly_at_fra=3000, ss_claim_age=64)],
+        accounts=[Account(name="401k", type=AccountType.tax_deferred, owner=0,
+                          balance=2_000_000, expected_return=0.055)],
+        annual_spending=80_000,
+        assumptions=Assumptions(roth_conversion_strategy=ConversionStrategy.none))
+    base, _ = Simulator(plan, strategy=ConversionStrategy.none).run()
+    cut, _ = Simulator(plan, strategy=ConversionStrategy.none,
+                       ss_cut=(2034, 0.77)).run()
+
+    def ss(rows, year):
+        return next(r for r in rows if r.year == year).ss_total
+
+    assert math.isclose(ss(cut, 2030), ss(base, 2030), rel_tol=1e-9)  # pre-2034 untouched
+    assert math.isclose(ss(cut, 2035), 0.77 * ss(base, 2035), rel_tol=1e-9)

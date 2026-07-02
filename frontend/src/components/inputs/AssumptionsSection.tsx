@@ -64,7 +64,7 @@ export function AssumptionsSection({ input, onChange, errors, dense }: SectionPr
               min={0}
               max={50}
               error={e("pre_retirement_tax_rate")}
-              help="Flat marginal rate used ONLY before retirement, for the annual tax drag on cash interest and any forced pre-retirement inflows. Wages themselves are not modeled."
+              help="Flat rate used ONLY before retirement, for the annual tax drag on cash interest — and, when no salary is entered, for pre-retirement inflows (SS/RMD/other income). When salaries are entered, working-year income tax is computed from wages with the full tax engine instead."
             />
             <PercentField
               label="Taxable dividend yield"

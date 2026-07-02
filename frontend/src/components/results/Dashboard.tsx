@@ -55,8 +55,9 @@ export function Dashboard({
           </h1>
           <p className="text-xs text-slate-500">
             Deterministic projection, {result.years[0]?.year}–
-            {result.years[result.years.length - 1]?.year}. All figures{" "}
-            {mode === "real" ? "in today's dollars" : "in nominal dollars"}.
+            {result.years[result.years.length - 1]?.year}. Charts and the year table shown{" "}
+            {mode === "real" ? "in today's dollars" : "in nominal dollars"}; metric cards and
+            strategy tables are always in today's dollars (as labeled).
           </p>
         </div>
         <Tooltip

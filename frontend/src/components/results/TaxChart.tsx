@@ -23,6 +23,7 @@ interface Datum {
   state: number;
   ltcg: number;
   niit: number;
+  penalties: number;
   irmaa: number;
 }
 
@@ -51,6 +52,7 @@ export function TaxChart({
         state: y.state_tax * d,
         ltcg: y.ltcg_tax * d,
         niit: y.niit * d,
+        penalties: y.penalties * d,
         irmaa: y.irmaa_surcharge * d,
       };
     });
@@ -118,6 +120,9 @@ export function TaxChart({
                     )}
                     {d.niit > 0.005 && <TooltipRow label="· NIIT" value={fmtCurrencyExact(d.niit)} />}
                     {d.state > 0.005 && <TooltipRow label="· State" value={fmtCurrencyExact(d.state)} />}
+                    {d.penalties > 0.005 && (
+                      <TooltipRow label="· Penalties" value={fmtCurrencyExact(d.penalties)} />
+                    )}
                     <TooltipRow color="#0d9488" label="Effective rate" value={fmtPct(d.rate / 100, 2)} />
                   </ChartTooltipShell>
                 );

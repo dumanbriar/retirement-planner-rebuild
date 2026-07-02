@@ -30,8 +30,9 @@ SPLIT_LEVELS = [0.0, 0.25, 0.5, 0.75, 1.0]
 
 
 def _run(plan: PlanInput, strategy: ConversionStrategy,
-         claim_ages: list[int] | None = None):
-    sim = Simulator(plan, strategy=strategy, claim_ages=claim_ages)
+         claim_ages: list[int] | None = None,
+         ss_cut: tuple[int, float] | None = None):
+    sim = Simulator(plan, strategy=strategy, claim_ages=claim_ages, ss_cut=ss_cut)
     rows, metrics = sim.run()
     return sim, rows, metrics
 
@@ -73,10 +74,11 @@ def optimize_ss(plan: PlanInput, strategy: ConversionStrategy
     persons = plan.persons
     ranges = []
     for p in persons:
-        if p.ss_monthly_at_fra > 0:
+        if p.ss_monthly_at_fra > 0 and p.current_age <= 70:
             lo = max(62, p.current_age)  # cannot claim in the past
             ranges.append(list(range(lo, 71)))
         else:
+            # no benefit, or already past 70 (nothing left to optimize)
             ranges.append([p.ss_claim_age])
     combos = [[a] for a in ranges[0]]
     if len(ranges) == 2:
@@ -246,18 +248,20 @@ def sensitivity_scenarios(plan: PlanInput, strategy: ConversionStrategy,
 
     out: list[SensitivityRow] = []
     for label, param, delta, mutate in scenarios:
+        ss_cut = None
         if mutate == "SS_CUT":
             # OASI trust-fund depletion scenario: 2024 SSA Trustees Report
             # projects ~23% across-the-board cut at depletion (2033-2035).
+            # The cut applies to benefits paid in 2034 and later — benefits
+            # received before 2034 are NOT reduced.
             p2 = copy.deepcopy(plan)
-            for x in p2.persons:
-                x.ss_monthly_at_fra *= 0.77
+            ss_cut = (2034, 0.77)
             ca = claim_ages
         else:
             p2 = perturbed(mutate)
             ca = [min(max(claim_ages[i], 62), 70) for i in range(len(claim_ages))]
         try:
-            _, _, m = _run(p2, strategy, ca)
+            _, _, m = _run(p2, strategy, ca, ss_cut=ss_cut)
             out.append(SensitivityRow(
                 label=label, parameter=param, delta=delta,
                 ending_net_worth_real=m.ending_net_worth_real,
@@ -297,12 +301,38 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
                    "reduced 25/36%/month if early."},
         {"label": "SS COLA", "value": fpct(a.inflation), "kind": "assumed",
          "source": "Plan inflation used as COLA proxy (actual COLA tracks CPI-W)."},
+        {"label": "SS survivor & spousal benefits", "value": "simplified annual model",
+         "kind": "estimated",
+         "source": "Survivor step-up: the survivor keeps the higher of their own "
+                   "benefit or the deceased's actual benefit, beginning at the "
+                   "survivor's own claiming age (widow(er) claiming from age 60 and "
+                   "the RIB-LIM cap are not modeled). If a spouse dies before "
+                   "claiming, no survivor benefit from their record is modeled "
+                   "(conservative). Spousal top-up assumes deemed filing once both "
+                   "spouses have filed."},
+        {"label": "State income tax", "value": f"{fpct(a.state_tax_rate)} flat",
+         "kind": "assumed",
+         "source": "User assumption: a single flat rate applied to federal taxable "
+                   "income in every year. Actual state rules differ materially "
+                   "(brackets, Social Security and retirement-income exclusions, "
+                   "state LTCG treatment)."},
         {"label": "RMDs", "value": "start 73 (born 1951-59) / 75 (1960+)",
          "kind": "modeled", "source": "SECURE 2.0 sec. 107; IRS Uniform Lifetime Table, "
                    "Pub. 590-B."},
         {"label": "Medicare Part B + IRMAA", "value": "$202.90/mo 2026 base",
          "kind": "modeled", "source": "CMS 2026 announcement; IRMAA multipliers per "
                    "42 U.S.C. 1395r(i) with 2-year MAGI lookback (modeled explicitly)."},
+        {"label": "IRMAA lookback MAGI (working years)",
+         "value": (f"${a.pre_retirement_magi:,.0f} (user input)"
+                   if a.pre_retirement_magi is not None
+                   else ("modeled from wages"
+                         if any(p.salary > 0 for p in plan.persons)
+                         else "1.5x annual spending (estimate)")),
+         "kind": "assumed" if a.pre_retirement_magi is not None else "estimated",
+         "source": "The 2-year lookback for the first two Medicare years falls in "
+                   "working years. Priority: the user-entered pre-retirement MAGI; "
+                   "otherwise the wage MAGI computed by the tax engine when salaries "
+                   "are entered; otherwise 1.5x the annual spending goal."},
         {"label": "ACA premium credit (pre-65)", "value": "2026 schedule w/ 400% FPL cliff",
          "kind": "estimated", "source": "Rev. Proc. 2025-25 applicable percentages; "
                    "2025 HHS poverty guidelines. Benchmark premium is a user estimate. "
@@ -334,8 +364,10 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
                    "contributions are NOT reduced in the purchase year — the full "
                    "contribution is made and the down payment is then drawn from accumulated "
                    "assets (cash and taxable first; if those fall short it draws from "
-                   "tax-advantaged accounts, with a 10% early-withdrawal penalty before age "
-                   "59.5 and a warning). To model funding the purchase by saving less, lower "
+                   "tax-advantaged accounts, with a warning). Withdrawals that fund the down "
+                   "payment are taxed that year — realized taxable gains, and ordinary income "
+                   "tax on raided pre-tax dollars, plus a 10% early-withdrawal penalty before "
+                   "age 59.5. To model funding the purchase by saving less, lower "
                    "your contributions for the relevant years."},
         {"label": "Withdrawal order", "value": "cash > taxable > tax-deferred > Roth > HSA",
          "kind": "modeled", "source": "Conventional tax-efficient sequencing; HSA reserved "
@@ -396,6 +428,24 @@ def assumption_notes(plan: PlanInput) -> list[dict[str, str]]:
                    "contributions vs. conversions vs. earnings are not tracked per-layer. "
                    "This is optimistic for large earnings pools; Roth is last in the "
                    "withdrawal waterfall so this edge rarely applies."},
+        {"label": "Living costs before household retirement",
+         "value": "paid from wages (not modeled)",
+         "kind": "assumed",
+         "source": "Until every person reaches their retirement age, lifestyle "
+                   "spending and existing debt payments are assumed covered by "
+                   "employment income; the retirement spending goal applies from the "
+                   "first full household-retirement year. If one spouse retires years "
+                   "before the other, the working spouse's income is assumed to cover "
+                   "household spending in those gap years."},
+        {"label": "Not modeled",
+         "value": "FICA, HSA limits, itemized deductions, 5-yr rules",
+         "kind": "estimated",
+         "source": "Payroll (FICA) taxes; HSA contribution limits (HSA entries are "
+                   "not checked against the IRC sec. 223 caps); the SECURE 2.0 "
+                   "mandatory-Roth catch-up for high earners (effective 2026); Roth "
+                   "5-year seasoning clocks; the IRA pro-rata basis rule; itemized "
+                   "deductions (standard deduction assumed); QCDs; estate/gift tax. "
+                   "Review these per client where they apply."},
     ]
     # Attach freshness metadata (last_updated, stale, review_url) to matched notes
     _NOTE_KEY_MAP = {

@@ -226,7 +226,7 @@ export interface Metrics {
   success: boolean;
   chosen_conversion_strategy: string;
   ss_claim_ages: number[];
-  /** Per-person Roth fraction under the chosen split ([] if not optimized). */
+  /** Single-element list: suggested HOUSEHOLD Roth fraction ([] if not optimized). Advisory only. */
   chosen_contribution_split: number[];
 }
 

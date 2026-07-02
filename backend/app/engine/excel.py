@@ -139,6 +139,39 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
                             f"{s.annual_amount:,.0f}/yr ages {s.start_age}-{s.end_age or 'death'}"
                             f"{' +COLA' if s.cola else ''}{'' if s.taxable else ' (non-taxable)'}",
                             "assumed", "User input"))
+    conv = a.roth_conversion_strategy.value
+    if conv == "custom":
+        conv += f" ({a.custom_conversion_amount:,.0f}/yr today's $)"
+    user_inputs += [
+        ("Assumption: inflation", f"{a.inflation * 100:g}%", "assumed", "User input"),
+        ("Assumption: healthcare inflation", f"{a.healthcare_inflation * 100:g}%",
+         "assumed", "User input"),
+        ("Assumption: state tax rate (flat)", f"{a.state_tax_rate * 100:g}%",
+         "assumed", "User input"),
+        ("Assumption: pre-retirement tax rate (flat drag)",
+         f"{a.pre_retirement_tax_rate * 100:g}%", "assumed", "User input"),
+        ("Assumption: taxable dividend yield", f"{a.taxable_dividend_yield * 100:g}%",
+         "assumed", "User input"),
+        ("Assumption: heir tax rate", f"{a.heir_tax_rate * 100:g}%", "assumed", "User input"),
+        ("Assumption: contributions grow with inflation",
+         "yes" if a.contributions_grow_with_inflation else "no", "assumed", "User input"),
+        ("Assumption: Roth conversion strategy", conv, "assumed", "User input"),
+        ("Assumption: optimize SS claiming ages",
+         "yes" if a.optimize_ss_claiming else "no", "assumed", "User input"),
+        ("Assumption: suggest Traditional/Roth contribution split",
+         "yes" if a.optimize_contribution_split else "no", "assumed", "User input"),
+        ("Assumption: ACA benchmark premium ($/mo/person, pre-65)",
+         a.aca_benchmark_monthly_per_person, "assumed", "User estimate"),
+        ("Assumption: pre-65 out-of-pocket healthcare ($/yr/person)",
+         float(a.pre65_oop_annual_per_person), "assumed", "User estimate"),
+        ("Assumption: Medicare other costs ($/yr/person, 65+)",
+         float(a.medicare_other_annual_per_person), "assumed", "User estimate"),
+        ("Assumption: pre-retirement MAGI (IRMAA 2-yr lookback)",
+         (f"{a.pre_retirement_magi:,.0f}" if a.pre_retirement_magi is not None
+          else "auto (wage MAGI when salaries entered, else 1.5x spending)"),
+         "assumed" if a.pre_retirement_magi is not None else "estimated",
+         "User input" if a.pre_retirement_magi is not None else "Engine estimate"),
+    ]
     for label, val, kind, src in user_inputs:
         ws.cell(row=r, column=1, value=label)
         ws.cell(row=r, column=2, value=val)
@@ -158,11 +191,23 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
     ws = wb.create_sheet("Accumulation")
     ws["A1"] = "Accumulation Phase — year by year until household retirement"
     ws["A1"].font = TITLE_FONT
+    base_year = result.years[0].year if result.years else 2026
+    inflation = plan.assumptions.inflation
+
+    def deflator(year: int) -> float:
+        """Divide a nominal figure by this to get today's dollars (the same
+        deflator the dashboard's Today's-$ toggle applies)."""
+        return (1 + inflation) ** (year - base_year)
+
     age_cols = [f"{p.name} age" for p in persons]
     headers = ["Year"] + age_cols + ["Contributions", "Growth (net of drag)",
-               "Tax drag / pre-ret. tax", "Forced RMD", "SS reinvested (gross)",
-               "Other income", "Home purchase", "Total assets", "Liabilities",
-               "Net worth", "Net worth (today's $)", "Notes"]
+               "Tax drag / pre-ret. tax", "Realized gains", "AGI",
+               "Taxable income", "Federal tax", "State tax", "Penalties",
+               "Effective rate", "Forced RMD", "SS reinvested (gross)",
+               "Other income", "Home purchase", "Surplus reinvested",
+               "Total assets", "Liabilities",
+               "Net worth", "Net worth (today's $)",
+               "Deflator (÷ nominal → today's $)", "Notes"]
     _sheet_header(ws, 3, headers)
     r = 4
     for y in result.years:
@@ -172,13 +217,21 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
         growth = sum(ac.growth for ac in y.accounts)
         vals = [y.year] + [y.ages[i] if i < len(y.ages) else None
                            for i in range(len(persons))] + \
-            [contrib, growth, y.total_tax, y.rmd_total, y.ss_total, y.other_income,
-             y.home_purchase, y.total_assets, y.total_liabilities, y.net_worth,
-             y.net_worth_real, "; ".join(y.flags)]
+            [contrib, growth, y.total_tax, y.realized_gains, y.agi,
+             y.taxable_income, y.federal_tax, y.state_tax, y.penalties,
+             y.effective_rate, y.rmd_total, y.ss_total, y.other_income,
+             y.home_purchase, y.surplus_reinvested,
+             y.total_assets, y.total_liabilities, y.net_worth,
+             y.net_worth_real, deflator(y.year), "; ".join(y.flags)]
         for c, v in enumerate(vals, 1):
             cell = ws.cell(row=r, column=c, value=v)
             if c > 1 + len(persons) and isinstance(v, float):
-                cell.number_format = MONEY
+                if headers[c - 1] == "Effective rate":
+                    cell.number_format = PCT
+                elif headers[c - 1].startswith("Deflator"):
+                    cell.number_format = "0.0000"
+                else:
+                    cell.number_format = MONEY
         r += 1
     _autosize(ws)
 
@@ -186,24 +239,33 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
     ws = wb.create_sheet("Retirement")
     ws["A1"] = "Retirement Phase — full cash-flow and tax detail"
     ws["A1"].font = TITLE_FONT
+    ws["A2"] = ("W/D HSA (medical) is tax-free and already netted inside "
+                "'Healthcare (net)'; W/D HSA (non-medical) funds spending and is "
+                "taxable. The dashboard's 'Wd HSA' column shows the non-medical "
+                "figure.")
+    ws["A2"].font = SUB_FONT
     headers = (["Year"] + age_cols +
                ["Filing", "Contributions", "Growth (net of drag)",
                 "Spend goal", "Debt pmts", "Home purchase", "Healthcare (net)",
                 "ACA subsidy", "IRMAA", "SS gross", "Taxable SS", "Other income",
                 "RMD", "W/D cash", "W/D taxable", "W/D tax-def", "W/D Roth",
-                "W/D HSA", "Roth conversion", "Realized gains", "Dividends",
+                "W/D HSA (medical)", "W/D HSA (non-medical)", "Roth conversion",
+                "Realized gains", "Dividends",
                 "Interest", "AGI", "MAGI", "Deductions", "Taxable income",
                 "Federal tax", "of which LTCG tax", "NIIT", "State tax",
                 "Penalties", "Total tax", "Marginal rate", "Effective rate",
                 "Surplus reinvested", "SHORTFALL", "Total assets", "Liabilities",
-                "Net worth", "Net worth (today's $)", "Notes"])
+                "Net worth", "Net worth (today's $)",
+                "Deflator (÷ nominal → today's $)", "Notes"])
     _sheet_header(ws, 3, headers)
     r = 4
     for y in result.years:
         if y.phase != "retirement":
             continue
         wbt = y.withdrawals_by_type
-        hsa_wd = sum(ac.withdrawal for ac in y.accounts if ac.type.value == "hsa")
+        hsa_total = sum(ac.withdrawal for ac in y.accounts if ac.type.value == "hsa")
+        hsa_nonmedical = wbt.get("hsa", 0.0)
+        hsa_medical = max(0.0, hsa_total - hsa_nonmedical)
         contrib = sum(ac.contribution for ac in y.accounts) - y.surplus_reinvested
         growth = sum(ac.growth for ac in y.accounts)
         vals = ([y.year] + [y.ages[i] if i < len(y.ages) else None
@@ -214,18 +276,21 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
                  y.aca_subsidy, y.irmaa_surcharge, y.ss_total, y.taxable_ss,
                  y.other_income, y.rmd_total, wbt.get("cash", 0.0),
                  wbt.get("taxable", 0.0), wbt.get("tax_deferred", 0.0),
-                 wbt.get("roth", 0.0), hsa_wd, y.roth_conversion,
+                 wbt.get("roth", 0.0), hsa_medical, hsa_nonmedical,
+                 y.roth_conversion,
                  y.realized_gains, y.dividends, y.interest, y.agi, y.magi,
                  y.deductions, y.taxable_income, y.federal_tax, y.ltcg_tax,
                  y.niit, y.state_tax, y.penalties, y.total_tax,
                  y.marginal_rate, y.effective_rate, y.surplus_reinvested,
                  y.shortfall, y.total_assets, y.total_liabilities, y.net_worth,
-                 y.net_worth_real, "; ".join(y.flags)])
+                 y.net_worth_real, deflator(y.year), "; ".join(y.flags)])
         for c, v in enumerate(vals, 1):
             cell = ws.cell(row=r, column=c, value=v)
             if isinstance(v, float):
                 if headers[c - 1] in ("Marginal rate", "Effective rate"):
                     cell.number_format = PCT
+                elif headers[c - 1].startswith("Deflator"):
+                    cell.number_format = "0.0000"
                 else:
                     cell.number_format = MONEY
             if y.shortfall > 1:
@@ -242,7 +307,10 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
                           "Start balance", "Contribution*", "Withdrawal",
                           "Conversion out", "Conversion in", "Growth", "End balance",
                           "Cost basis (taxable)"])
-    ws["A2"] = "*Contribution includes reinvested surplus income in retirement years."
+    ws["A2"] = ("*Contribution includes reinvested amounts, not just new savings: "
+                "net pre-retirement inflows (SS/RMD/other income) and reinvested "
+                "Traditional tax savings in accumulation years, and reinvested "
+                "surplus income in retirement years.")
     ws["A2"].font = SUB_FONT
     r = 4
     for y in result.years:

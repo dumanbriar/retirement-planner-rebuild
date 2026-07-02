@@ -83,7 +83,11 @@ class Simulator:
     def __init__(self, plan: PlanInput,
                  strategy: Optional[ConversionStrategy] = None,
                  claim_ages: Optional[list[int]] = None,
-                 base_calendar_year: int = C.BASE_YEAR):
+                 base_calendar_year: int = C.BASE_YEAR,
+                 ss_cut: Optional[tuple[int, float]] = None):
+        # ss_cut = (first_year, multiplier): benefits paid in first_year and
+        # later are scaled by multiplier (trust-fund depletion scenarios).
+        self.ss_cut = ss_cut
         self.plan = plan
         self.a = plan.assumptions
         self.strategy = strategy if strategy is not None else self.a.roth_conversion_strategy
@@ -124,7 +128,10 @@ class Simulator:
                     self.birth_years[i] + self.claim_ages[i] < self.retirement_year:
                 self.warnings.append(
                     f"{p.name}: Social Security starts before household retirement; those "
-                    "benefits are reinvested net of the pre-retirement tax rate.")
+                    "benefits are reinvested net of tax ("
+                    + ("working-year income tax computed from wages"
+                       if self.has_salary else "the flat pre-retirement tax rate")
+                    + ").")
 
     # ------------------------------------------------------------------ utils
     def infl(self, year: int) -> float:
@@ -234,7 +241,8 @@ class Simulator:
                     self.ss_level[i] = self.deceased_ss_level
 
     def ss_benefits(self, year: int) -> list[float]:
-        return [self.ss_level[i] * self.infl(year) if self.alive(i, year) else 0.0
+        cut = self.ss_cut[1] if self.ss_cut and year >= self.ss_cut[0] else 1.0
+        return [self.ss_level[i] * self.infl(year) * cut if self.alive(i, year) else 0.0
                 for i in range(len(self.persons))]
 
     def other_income(self, year: int) -> tuple[float, float]:
@@ -423,11 +431,20 @@ class Simulator:
                                         if self._liab_active(l, year))
             row.net_worth = row.total_assets - row.total_liabilities
             row.net_worth_real = row.net_worth / self.infl(year)
-            self.magi_history[year] = row.magi if retired \
-                else self.pre_retirement_magi() * self.infl(year)
+            # IRMAA 2-year lookback source: retirement years use computed MAGI;
+            # accumulation years use the modeled wage MAGI when salaries are
+            # entered (unless the user explicitly supplied pre_retirement_magi),
+            # falling back to the documented 1.5x-spending estimate.
+            if retired or (self.has_salary and row.magi > 0
+                           and self.a.pre_retirement_magi is None):
+                self.magi_history[year] = row.magi
+            else:
+                self.magi_history[year] = self.pre_retirement_magi() * self.infl(year)
 
-            lifetime_tax += row.total_tax + row.penalties
-            lifetime_tax_real += (row.total_tax + row.penalties) / self.infl(year)
+            # row.total_tax already includes penalties in both phases; adding
+            # row.penalties again would double-count them.
+            lifetime_tax += row.total_tax
+            lifetime_tax_real += row.total_tax / self.infl(year)
             if row.shortfall > 1 and not depleted:
                 depleted = True
                 depletion_age = next(a for a in row.ages if a is not None)
@@ -501,39 +518,19 @@ class Simulator:
         benefits = self.ss_benefits(year)
         other_taxable, other_nontaxable = self.other_income(year)
 
-        if self.has_salary:
-            # Real income tax on wages + pre-retirement inflows, with the
-            # Traditional deduction valued at the true marginal bracket and its
-            # tax saving reinvested ("invest the tax savings").
-            self._accumulation_taxes(year, status, row, rmd_total, benefits,
-                                     other_taxable, other_nontaxable,
-                                     traditional_deferral)
-        else:
-            # Legacy flat-rate path (wages not modeled): pre-retirement inflows
-            # taxed at the flat rate and reinvested net.
-            inflows = rmd_total + sum(benefits) + other_taxable
-            net_inflow = inflows * (1 - self.a.pre_retirement_tax_rate) + other_nontaxable
-            row.total_tax = inflows * self.a.pre_retirement_tax_rate
-            self._reinvest(net_inflow, row)
-
-        row.ss_benefit = benefits
-        row.ss_total = sum(benefits)
-        row.other_income = other_taxable + other_nontaxable
-        row.rmd_total = rmd_total
-        row.rmd_by_person = rmds
-
         # a home purchase this year: fund the down payment from the portfolio
-        # (cash -> taxable -> ... via the waterfall). The down payment does NOT
-        # reduce contributions — that year's full contributions are made above,
-        # and the down payment is drawn from accumulated assets. Penalties for
-        # raiding tax-advantaged accounts are folded into tax so they aren't free.
+        # (cash -> taxable -> ... via the waterfall) BEFORE taxes are computed,
+        # so realized taxable gains and any tax-deferred/HSA dollars raided are
+        # taxed as income this year (plus early-withdrawal penalties). The down
+        # payment does NOT reduce contributions — that year's full contributions
+        # are made above, and the down payment is drawn from accumulated assets.
+        td_before_raid = scratch.withdrawals_by_type.get("tax_deferred", 0.0)
         if home_purchase > 0:
             adv = (AccountType.tax_deferred, AccountType.roth, AccountType.hsa)
             adv_before = sum(scratch.withdrawals_by_type.get(t.value, 0.0) for t in adv)
             pen_before = scratch.penalties
             got = self.waterfall_withdraw(home_purchase, scratch, year)
             row.home_purchase = home_purchase
-            row.total_tax += scratch.penalties
             if scratch.flags:
                 row.flags = list(row.flags) + scratch.flags
             if got + 1 < home_purchase:
@@ -561,6 +558,38 @@ class Simulator:
                 if msg not in self.warnings:
                     self.warnings.append(msg)
 
+        # income the down-payment raid created (beyond the RMDs already counted)
+        raid_ordinary = (scratch.withdrawals_by_type.get("tax_deferred", 0.0)
+                         - td_before_raid) + scratch.hsa_nonmedical
+
+        if self.has_salary:
+            # Real income tax on wages + pre-retirement inflows, with the
+            # Traditional deduction valued at the true marginal bracket and its
+            # tax saving reinvested ("invest the tax savings").
+            self._accumulation_taxes(year, status, row, rmd_total, benefits,
+                                     other_taxable, other_nontaxable,
+                                     traditional_deferral, raid_ordinary,
+                                     scratch.realized_gains)
+        else:
+            # Legacy flat-rate path (wages not modeled): pre-retirement inflows
+            # taxed at the flat rate and reinvested net. Raid income is taxed at
+            # the flat rate; realized gains at the documented 15% LTCG rate.
+            inflows = rmd_total + sum(benefits) + other_taxable
+            net_inflow = inflows * (1 - self.a.pre_retirement_tax_rate) + other_nontaxable
+            row.total_tax = (inflows + raid_ordinary) * self.a.pre_retirement_tax_rate \
+                + scratch.realized_gains * ACCUM_DIVIDEND_TAX_RATE
+            self._reinvest(net_inflow, row)
+
+        row.ss_benefit = benefits
+        row.ss_total = sum(benefits)
+        row.other_income = other_taxable + other_nontaxable
+        row.rmd_total = rmd_total
+        row.rmd_by_person = rmds
+        row.realized_gains = scratch.realized_gains
+        row.penalties = scratch.penalties
+        # penalties ride on total tax (assumed paid from wages, like income tax)
+        row.total_tax += scratch.penalties
+
         self._check_contribution_limits(year, row)
         row.withdrawals_by_type = scratch.withdrawals_by_type
         return row
@@ -568,7 +597,9 @@ class Simulator:
     def _accumulation_taxes(self, year: int, status: str, row: YearRow,
                             rmd_total: float, benefits: list[float],
                             other_taxable: float, other_nontaxable: float,
-                            traditional_deferral: float) -> None:
+                            traditional_deferral: float,
+                            raid_ordinary: float = 0.0,
+                            realized_gains: float = 0.0) -> None:
         """Working-year federal/state income tax using wages as the marginal
         context. Traditional (tax-deferred) deferrals are deductible and the
         resulting tax saving is reinvested. Dividends/cash interest stay on the
@@ -584,20 +615,25 @@ class Simulator:
                      if self.alive(i, year) and self.age(i, year) >= C.MEDICARE_AGE)
         ss_total = sum(benefits)
 
-        def _tax(ordinary: float):
+        def _tax(ordinary: float, gains: float = 0.0):
             return compute_taxes(TaxYearInput(
                 year=year, filing_status=status, inflation=a.inflation,
                 ordinary_income=max(0.0, ordinary), ss_benefits=ss_total,
-                qualified_dividends=0.0, realized_ltcg=0.0, interest=0.0,
+                qualified_dividends=0.0, realized_ltcg=gains, interest=0.0,
                 ages_65_plus=ages65, state_rate=a.state_tax_rate))
 
         base_ordinary = salaries + rmd_total + other_taxable
-        tax_with = _tax(base_ordinary - traditional_deferral)   # actual tax owed
-        tax_without_deferral = _tax(base_ordinary)              # if not deducted
+        # actual tax owed, incl. any down-payment raid income & realized gains
+        tax_with = _tax(base_ordinary - traditional_deferral + raid_ordinary,
+                        realized_gains)
+        tax_without_deferral = _tax(base_ordinary + raid_ordinary, realized_gains)
         tax_saving = max(0.0, tax_without_deferral.total - tax_with.total)
-        # marginal tax caused by the inflows, so they reinvest net of their tax
+        # marginal tax caused by the recurring inflows (excluding the one-time
+        # raid, whose tax is assumed paid from wages like the rest of the wage
+        # tax), so those inflows reinvest net of their own tax
+        tax_no_raid = _tax(base_ordinary - traditional_deferral)
         tax_salary_only = _tax(salaries - traditional_deferral)
-        tax_on_inflows = max(0.0, tax_with.total - tax_salary_only.total)
+        tax_on_inflows = max(0.0, tax_no_raid.total - tax_salary_only.total)
 
         row.taxable_ss = tax_with.taxable_ss
         row.agi = tax_with.agi
@@ -704,7 +740,7 @@ class Simulator:
                             if l["balance"] > 0 and self._liab_active(l, year))
 
         snapshot = [(x.balance, x.basis) for x in self.accounts]
-        tax_guess, subsidy_guess = prev_tax, 0.0
+        tax_guess, subsidy_guess, pen_guess = prev_tax, 0.0, 0.0
         last_conversion = 0.0
         last_ord_taxable = 0.0
         scratch = YearScratch()
@@ -767,10 +803,14 @@ class Simulator:
                 roth_tgt.conv_in += converted
                 scratch.roth_conversion = converted
 
-            # 4) cover remaining need from the waterfall
-            need = spend_goal + debt_payments + home_purchase + healthcare_net + tax_guess
+            # 4) cover remaining need from the waterfall. Penalties are part of
+            #    the need and are funded like taxes: pen_guess carries the prior
+            #    iterate's penalties (they arise DURING the waterfall, so they
+            #    can't be known up front) and the fixed point converges on them.
+            need = (spend_goal + debt_payments + home_purchase + healthcare_net
+                    + tax_guess + max(scratch.penalties, pen_guess))
             resources = ss_total + other_taxable + other_nontaxable + rmd_total
-            gap = need + scratch.penalties - resources
+            gap = need - resources
             if gap > 0:
                 got = self.waterfall_withdraw(gap, scratch, year)
                 scratch.shortfall = max(0.0, gap - got)
@@ -794,11 +834,14 @@ class Simulator:
                 new_subsidy = aca_subsidy(tax_res.aca_magi, n_alive,
                                           aca_benchmark, year, a.inflation)
             if abs(tax_res.total - tax_guess) < 0.5 and \
-                    abs(new_subsidy - subsidy_guess) < 0.5 and it > 0:
-                tax_guess, subsidy_guess = tax_res.total, new_subsidy
+                    abs(new_subsidy - subsidy_guess) < 0.5 and \
+                    abs(scratch.penalties - pen_guess) < 0.5 and it > 0:
+                tax_guess, subsidy_guess, pen_guess = \
+                    tax_res.total, new_subsidy, scratch.penalties
                 converged = True
                 break
-            tax_guess, subsidy_guess = tax_res.total, new_subsidy
+            tax_guess, subsidy_guess, pen_guess = \
+                tax_res.total, new_subsidy, scratch.penalties
 
         if not converged:
             scratch.flags.append("tax/ACA fixed point did not fully converge; last iterate used")
