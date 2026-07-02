@@ -150,8 +150,12 @@ export interface PrivateHolding {
   /** Level annual cash distribution (nominal $/yr) paid out of the growth. */
   annual_distribution: number;
   distribution_kind: DistributionKind;
-  /** Optional liquidity event: sell the entire holding at this age (null => hold to death). */
+  /** Optional one-time liquidity event: sell the entire holding at this age. Mutually exclusive with divest_start_age. */
   sale_age: number | null;
+  /** Optional phased sale: age to begin selling a fixed % of the ORIGINAL value each year. Mutually exclusive with sale_age. */
+  divest_start_age: number | null;
+  /** Fraction (0..1) of the original value sold per year once divest_start_age is reached. */
+  annual_divest_pct: number;
   beneficiary?: Beneficiary; // terminal estate destination
 }
 

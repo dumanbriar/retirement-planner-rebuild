@@ -137,6 +137,7 @@ class SimPrivate:
         self.owner = spec.owner
         self.value = spec.value
         self.basis = spec.basis
+        self.original_value = spec.value  # base for phased-divestiture %s
         self.active = True
         # per-year reporting scratch
         self.start_balance = self.value
@@ -935,10 +936,13 @@ class Simulator:
         results are stable across the tax fixed point. The value grows at the
         assumed rate; a level K-1 cash distribution is paid out of that growth
         (taxed in full as ordinary income or qualified dividends per the
-        holding's distribution_kind). A liquidity event at sale_age sells the
-        entire holding at its current value into the portfolio; the gain over
-        cost basis is a long-term capital gain (IRC §1(h)). Sets per-year
-        scratch: _priv_distribution (cash, split into _priv_dist_ordinary /
+        holding's distribution_kind). Divestiture is EITHER a one-time
+        liquidity event at sale_age (sells the entire holding) OR a phased
+        sale from divest_start_age (a fixed % of the ORIGINAL value sold each
+        year, pro-rating basis) — mutually exclusive by construction (model
+        validator). Either way the realized gain over cost basis is a
+        long-term capital gain (IRC §1(h)). Sets per-year scratch:
+        _priv_distribution (cash, split into _priv_dist_ordinary /
         _priv_dist_qualified) and _priv_sale_gain (LTCG)."""
         self._priv_distribution = 0.0
         self._priv_dist_ordinary = 0.0
@@ -952,8 +956,8 @@ class Simulator:
             if not h.active or not self.alive(h.owner, year):
                 continue
             age = self.age(h.owner, year)
-            # liquidity event: sell everything at the current value; proceeds
-            # join the portfolio (after-tax — the LTCG is taxed separately).
+            # one-time liquidity event: sell everything at the current value;
+            # proceeds join the portfolio (after-tax — LTCG taxed separately).
             if h.spec.sale_age is not None and age >= h.spec.sale_age:
                 self._priv_sale_gain += max(0.0, h.value - h.basis)
                 h.sale_proceeds = h.value
@@ -965,6 +969,28 @@ class Simulator:
                 h.value = 0.0
                 h.active = False
                 continue
+            # phased divestiture: sell a fixed % of the ORIGINAL value each
+            # year (basis reduced pro-rata to the fraction of the CURRENT
+            # value sold), before this year's growth/distribution.
+            if h.spec.divest_start_age is not None and age >= h.spec.divest_start_age \
+                    and h.value > 0:
+                target = h.original_value * h.spec.annual_divest_pct
+                amount = min(target, h.value)
+                frac = amount / h.value
+                basis_sold = h.basis * frac
+                self._priv_sale_gain += max(0.0, amount - basis_sold)
+                h.value -= amount
+                h.basis -= basis_sold
+                h.sale_proceeds = amount
+                tgt = self.surplus_account()
+                tgt.balance += amount
+                tgt.contribution += amount
+                if tgt.spec.type == AccountType.taxable:
+                    tgt.basis += amount
+                if h.value <= 0.01:
+                    h.value = 0.0
+                    h.active = False
+                    continue
             # grow, then pay the K-1 distribution out of the (grown) value
             h.growth = h.value * h.rate
             d = min(h.spec.annual_distribution, h.value + h.growth)

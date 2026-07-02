@@ -184,9 +184,14 @@ class PrivateHolding(BaseModel):
     Amounts are nominal. The holding never enters the withdrawal waterfall;
     its value counts in net worth. It grows at the assumed rate, may pay a
     level annual K-1 cash distribution (taxed in full as `distribution_kind`),
-    and can be sold in a one-time liquidity event at `sale_age` — the gain
-    over cost basis is a long-term capital gain (IRC §1(h)). Held to death,
-    the shares pass to heirs with a stepped-up basis (IRC §1014)."""
+    and can be divested in EITHER (mutually exclusive):
+      - a one-time liquidity event at `sale_age` — the full value is sold; or
+      - a phased sale: starting at `divest_start_age`, a fixed percentage of
+        the ORIGINAL value (`annual_divest_pct`) is sold each year (e.g. 10%
+        of the original stake annually) until fully divested.
+    Either way the gain over cost basis (pro-rata for a partial sale) is a
+    long-term capital gain (IRC §1(h)). Held to death, the shares pass to
+    heirs with a stepped-up basis (IRC §1014)."""
     name: str = "Private company shares"
     owner: int = Field(default=0, ge=0, le=1)
     value: float = Field(default=0, ge=0)        # current fair market value, nominal
@@ -197,7 +202,24 @@ class PrivateHolding(BaseModel):
     distribution_kind: DistributionKind = DistributionKind.ordinary
     # Optional liquidity event: sell the entire holding at this age.
     sale_age: Optional[int] = Field(default=None, ge=18, le=100)
+    # Optional phased divestiture: age to begin, and the fraction of the
+    # ORIGINAL value sold each year thereafter (0.10 = 10%/yr). Mutually
+    # exclusive with sale_age.
+    divest_start_age: Optional[int] = Field(default=None, ge=18, le=100)
+    annual_divest_pct: float = Field(default=0, ge=0, le=1)
     beneficiary: Beneficiary = Beneficiary.heirs  # terminal estate destination
+
+    @model_validator(mode="after")
+    def _check_divestiture(self) -> "PrivateHolding":
+        if self.sale_age is not None and self.divest_start_age is not None:
+            raise ValueError(
+                f"Private holding '{self.name}': choose either a one-time sale "
+                "age or a phased divestiture schedule, not both")
+        if self.divest_start_age is not None and self.annual_divest_pct <= 0:
+            raise ValueError(
+                f"Private holding '{self.name}': a phased divestiture start age "
+                "needs a positive annual divestiture percentage")
+        return self
 
 
 class RealEstate(BaseModel):

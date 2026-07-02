@@ -80,7 +80,7 @@ export const MODELING_DISCLOSURES: Record<string, ModelingSpec> = {
       "Illiquid: never tapped by the withdrawal waterfall; value counts in net worth",
       "Grows at the assumed rate; optional level K-1 cash distribution paid out of the growth",
       "K-1 taxed in full each year as ordinary income or qualified dividends",
-      "Optional liquidity event: sale gain over basis is a long-term capital gain (IRC §1(h))",
+      "Optional: a one-time sale or a phased sale (fixed % of the original value per year); gain over basis is a long-term capital gain (IRC §1(h))",
       "Held to death: basis step-up, no income tax to heirs (IRC §1014)",
     ],
     notModeled: [

@@ -208,6 +208,8 @@ export function newPrivateHolding(): PrivateHolding {
     annual_distribution: 0,
     distribution_kind: "ordinary",
     sale_age: null,
+    divest_start_age: null,
+    annual_divest_pct: 0,
     beneficiary: "heirs",
   };
 }

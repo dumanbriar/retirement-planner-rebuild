@@ -1,7 +1,7 @@
 import { Home, Plus, Trash2 } from "lucide-react";
 import type { Liability } from "../../lib/types";
 import { newLiability, newRealEstate } from "../../lib/sample";
-import { NumberField, OptionalNumberField, PercentField, TextField } from "../ui/fields";
+import { CheckboxField, NumberField, OptionalNumberField, PercentField, TextField } from "../ui/fields";
 import { removeAt, type SectionProps, updateAt } from "./sectionProps";
 
 export function LiabilitiesSection({ input, onChange, errors, dense }: SectionProps) {
@@ -21,14 +21,23 @@ export function LiabilitiesSection({ input, onChange, errors, dense }: SectionPr
     });
 
   // Second entry path for a property: track the home behind a mortgage.
-  const trackProperty = (i: number) =>
-    onChange({
-      ...input,
-      real_estate: [
-        ...input.real_estate,
-        newRealEstate(i, `Home (${input.liabilities[i].name})`),
-      ],
-    });
+  // Reversible — turning it back off removes the linked Real estate entry
+  // (rather than leaving a one-way, unremovable link).
+  const setTrackProperty = (i: number, on: boolean) => {
+    if (on) {
+      onChange({
+        ...input,
+        real_estate: [
+          ...input.real_estate,
+          newRealEstate(i, `Home (${input.liabilities[i].name})`),
+        ],
+      });
+    } else {
+      const linkedIndex = input.real_estate.findIndex((r) => r.liability_index === i);
+      if (linkedIndex === -1) return;
+      onChange({ ...input, real_estate: removeAt(input.real_estate, linkedIndex) });
+    }
+  };
 
   return (
     <div className="space-y-3">
@@ -102,20 +111,18 @@ export function LiabilitiesSection({ input, onChange, errors, dense }: SectionPr
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               {(() => {
                 const linked = input.real_estate.find((r) => r.liability_index === i);
-                return linked ? (
-                  <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
-                    <Home className="h-3 w-3" /> Property tracked: {linked.name} (see Real
-                    estate)
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => trackProperty(i)}
-                    className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 transition-colors hover:text-brand-600"
-                    title="Also track the property behind this loan as an asset (appreciation, sale with mortgage payoff, basis step-up at death)."
-                  >
-                    <Home className="h-3 w-3" /> Track the property as an asset
-                  </button>
+                return (
+                  <CheckboxField
+                    label={
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500">
+                        <Home className="h-3 w-3" />
+                        {linked ? `Tracked as an asset: ${linked.name}` : "Track the property as an asset"}
+                      </span>
+                    }
+                    checked={!!linked}
+                    onChange={(on) => setTrackProperty(i, on)}
+                    help="Also track the property behind this loan under Real estate — appreciation, sale with mortgage payoff, basis step-up at death. Turning this off removes that Real estate entry (any values entered there are lost); the loan itself is unaffected."
+                  />
                 );
               })()}
               <button

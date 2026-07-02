@@ -175,8 +175,13 @@ def build_workbook(plan: PlanInput, result: PlanResult) -> bytes:
             + ("; bequest -> charity" if an.beneficiary.value == "charity" else ""),
             "assumed", "User input"))
     for h in plan.private_holdings:
-        sale = (f"; sell at {h.sale_age}" if h.sale_age is not None
-                else "; held to death (basis step-up)")
+        if h.sale_age is not None:
+            sale = f"; sell at {h.sale_age}"
+        elif h.divest_start_age is not None:
+            sale = (f"; phased sale {h.annual_divest_pct * 100:.1f}%/yr of original "
+                    f"from age {h.divest_start_age}")
+        else:
+            sale = "; held to death (basis step-up)"
         dist = (f"; K-1 {h.annual_distribution:,.0f}/yr ({h.distribution_kind.value})"
                 if h.annual_distribution else "")
         user_inputs.append((

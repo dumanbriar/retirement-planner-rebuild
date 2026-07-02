@@ -1058,6 +1058,111 @@ def test_real_estate_identity_and_workbook():
     assert build_workbook(plan, result)[:2] == b"PK"
 
 
+def test_private_phased_divestiture_hand_check():
+    # value 500k, basis 200k, growth 5%, distribution 10k (ordinary), phased
+    # sale of 10%/yr of the ORIGINAL value starting at 65.
+    # Divest: target = 500k*0.10 = 50k; frac = 50k/500k = 0.1;
+    #   basis_sold = 200k*0.1 = 20k; gain = 50k-20k = 30k.
+    #   value -> 450k; basis -> 180k.
+    # Growth on remainder: 450k*0.05 = 22,500 -> 472,500; distribution 10k
+    #   caps at min(10k, 472,500) -> end value 462,500.
+    h = PrivateHolding(name="S-corp", owner=0, value=500_000, basis=200_000,
+                       growth_rate=0.05, annual_distribution=10_000,
+                       distribution_kind=DistributionKind.ordinary,
+                       divest_start_age=65, annual_divest_pct=0.10)
+    sim = Simulator(_solo_with_holding(h), strategy=ConversionStrategy.none)
+    sim.prepare_private(2031)  # Pat (born 1966) is 65 in 2031
+    assert math.isclose(sim._priv_sale_gain, 30_000, abs_tol=0.01)
+    pr = sim.holdings[0]
+    assert math.isclose(pr.sale_proceeds, 50_000, abs_tol=0.01)
+    assert math.isclose(pr.basis, 180_000, abs_tol=0.01)
+    assert math.isclose(pr.growth, 22_500, abs_tol=0.01)
+    assert math.isclose(pr.distribution, 10_000, abs_tol=0.01)
+    assert math.isclose(pr.value, 462_500, abs_tol=0.01)
+    # accounting identity: start - withdrawal - distribution + growth = end
+    assert math.isclose(500_000 - 50_000 - 10_000 + 22_500, pr.value, abs_tol=0.01)
+
+
+def test_private_phased_divestiture_multi_year_and_depletion():
+    # No growth/distribution for clean arithmetic: value 400k, basis 160k
+    # (40% basis ratio), 25%/yr of the ORIGINAL value starting at 65 ->
+    # fully divested after exactly 4 years, each year selling 100k, with
+    # basis reduced by 40% of each year's proceeds (constant ratio here
+    # since growth is 0, so frac each year = 100k / remaining value grows,
+    # but basis:value ratio stays 40% only for the first year — verify via
+    # direct simulation instead of a closed form).
+    h = PrivateHolding(name="Fund", owner=0, value=400_000, basis=160_000,
+                       growth_rate=0.0, divest_start_age=65,
+                       annual_divest_pct=0.25)
+    sim = Simulator(_solo_with_holding(h), strategy=ConversionStrategy.none)
+    pr = sim.holdings[0]
+    # year 1 (age 65): target = 400k*0.25=100k; frac=100k/400k=0.25;
+    #   basis_sold=160k*0.25=40k -> value 300k, basis 120k
+    sim.prepare_private(2031)
+    assert math.isclose(pr.value, 300_000, abs_tol=0.01)
+    assert math.isclose(pr.basis, 120_000, abs_tol=0.01)
+    assert pr.active
+    # year 2 (age 66): target still 100k (of ORIGINAL 400k); frac=100k/300k;
+    #   basis_sold = 120k * (100k/300k) = 40k -> value 200k, basis 80k
+    sim.prepare_private(2032)
+    assert math.isclose(pr.value, 200_000, abs_tol=0.01)
+    assert math.isclose(pr.basis, 80_000, abs_tol=0.01)
+    # year 3 (age 67): frac=100k/200k=0.5; basis_sold=80k*0.5=40k
+    #   -> value 100k, basis 40k
+    sim.prepare_private(2033)
+    assert math.isclose(pr.value, 100_000, abs_tol=0.01)
+    assert math.isclose(pr.basis, 40_000, abs_tol=0.01)
+    assert pr.active
+    # year 4 (age 68): target 100k == remaining value -> fully divested
+    sim.prepare_private(2034)
+    assert pr.value == 0
+    assert pr.basis == 0
+    assert not pr.active
+    assert math.isclose(sim._priv_sale_gain, 60_000, abs_tol=0.01)  # 100k-40k
+
+
+def test_private_phased_divestiture_before_start_age_is_inert():
+    h = PrivateHolding(name="Fund", owner=0, value=300_000, basis=100_000,
+                       growth_rate=0.0, divest_start_age=70, annual_divest_pct=0.20)
+    sim = Simulator(_solo_with_holding(h), strategy=ConversionStrategy.none)
+    sim.prepare_private(2027)  # Pat is 61: below divest_start_age
+    assert sim.holdings[0].value == 300_000
+    assert sim._priv_sale_gain == 0.0
+
+
+def test_private_sale_age_and_divest_are_mutually_exclusive():
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        PrivateHolding(name="Bad", owner=0, value=100_000, sale_age=65,
+                       divest_start_age=70, annual_divest_pct=0.1)
+
+
+def test_private_divest_start_age_requires_positive_pct():
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        PrivateHolding(name="Bad", owner=0, value=100_000, divest_start_age=70,
+                       annual_divest_pct=0)
+
+
+def test_private_phased_divestiture_full_plan_identity_and_workbook():
+    h = PrivateHolding(name="S-corp", owner=0, value=350_000, basis=150_000,
+                       growth_rate=0.04, annual_distribution=8_000,
+                       distribution_kind=DistributionKind.ordinary,
+                       divest_start_age=65, annual_divest_pct=0.15)
+    plan = couple_plan(private_holdings=[h])
+    rows, m = Simulator(plan, strategy=ConversionStrategy.fill_12).run()
+    for y in rows:
+        for ac in y.accounts:
+            recon = (ac.start_balance + ac.contribution - ac.withdrawal
+                     - ac.distribution - ac.conversion_out + ac.conversion_in
+                     + ac.growth)
+            assert math.isclose(recon, ac.end_balance, abs_tol=0.5), \
+                f"{y.year} {ac.name}"
+    from app.engine.excel import build_workbook
+    result = build_plan(plan)
+    assert build_workbook(plan, result)[:2] == b"PK"
+
+
 def test_retirement_sale_deposit_survives_tax_fixed_point():
     # Regression: contributions deposited by the prepare_* steps (a property or
     # holding sale, an insurance surrender) were wiped by reset_flows() inside

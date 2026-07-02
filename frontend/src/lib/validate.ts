@@ -113,6 +113,14 @@ export function validatePlanInput(input: PlanInput): FieldErrors {
     if (!(h.annual_distribution >= 0)) errors[k("annual_distribution")] = "Must be ≥ 0.";
     if (h.sale_age != null && !inRange(h.sale_age, 18, 100))
       errors[k("sale_age")] = "Sale age must be 18–100.";
+    if (h.divest_start_age != null && !inRange(h.divest_start_age, 18, 100))
+      errors[k("divest_start_age")] = "Start age must be 18–100.";
+    if (h.divest_start_age != null && !(h.annual_divest_pct > 0))
+      errors[k("annual_divest_pct")] = "Enter a percentage sold per year.";
+    if (h.annual_divest_pct != null && !inRange(h.annual_divest_pct, 0, 1))
+      errors[k("annual_divest_pct")] = "Must be 0–100%.";
+    if (h.sale_age != null && h.divest_start_age != null)
+      errors[k("divest_start_age")] = "Choose either a one-time sale or a phased sale, not both.";
     if (h.owner >= input.persons.length) errors[k("owner")] = "Owner is out of range.";
   });
 
