@@ -59,6 +59,7 @@ export const MODELING_DISCLOSURES: Record<string, ModelingSpec> = {
       "Cash value grows tax-deferred at the assumed rate",
       "Death benefit passes income-tax-free to heirs/survivor (IRC §101)",
       "Surrender taxes cash value over total premiums as ordinary income (IRC §72(e))",
+      "Counted in Net worth and the Legacy & Estate view, but not broken out in the 'Net worth by account type' chart (that chart only buckets the ordinary account types)",
     ],
     notModeled: [
       "Policy loans, dividends / paid-up additions, MEC rules, variable/indexed crediting",
@@ -70,6 +71,7 @@ export const MODELING_DISCLOSURES: Record<string, ModelingSpec> = {
       "Level period-certain payout from the annuitization age",
       "Exclusion ratio: basis tax-free, gain ordinary income (IRC §72(b))",
       "At death the remaining gain is taxable to heirs (IRD, no step-up, §691/§72)",
+      "Counted in Net worth and the Legacy & Estate view, but not broken out in the 'Net worth by account type' chart (that chart only buckets the ordinary account types)",
     ],
     notModeled: [
       "Variable/indexed subaccounts, GLWB income riders, lifetime (mortality-based) payout",
@@ -82,6 +84,7 @@ export const MODELING_DISCLOSURES: Record<string, ModelingSpec> = {
       "K-1 taxed in full each year as ordinary income or qualified dividends",
       "Optional: a one-time sale or a phased sale (fixed % of the original value per year); gain over basis is a long-term capital gain (IRC §1(h))",
       "Held to death: basis step-up, no income tax to heirs (IRC §1014)",
+      "Counted in Net worth and the Legacy & Estate view, but not broken out in the 'Net worth by account type' chart (that chart only buckets the ordinary account types)",
     ],
     notModeled: [
       "Pass-through basis adjustments (the K-1 is taxed as cash received), QSBS §1202, valuation discounts, installment sales",
@@ -94,6 +97,7 @@ export const MODELING_DISCLOSURES: Record<string, ModelingSpec> = {
       "A linked mortgage's remaining balance is paid off from the sale proceeds",
       "Held to death: basis step-up, no income tax to heirs (IRC §1014)",
       "Optional: exclude the value from net worth (still shown in the Legacy view)",
+      "When counted in Net worth, it's not broken out in the 'Net worth by account type' chart (that chart only buckets the ordinary account types) — see the Legacy & Estate view for its value",
     ],
     notModeled: [
       "Depreciation recapture (§1250), §1031 exchanges, property tax/upkeep (fold into spending), rental income (add an income stream), §121 ownership/use tests",
